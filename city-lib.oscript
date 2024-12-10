@@ -1,0 +1,86 @@
+{
+	getters: `{
+
+		$claim_followup_reward = ($house1, $house2, $house1_num, $house2_num, $days, $address, $followup_claim_term, $matching_timeout, $fu) => {
+			require($house1, "house1 does not exist");
+			require($house2, "house2 does not exist");
+			require($house2_num == $house1_num + 1, "not neighbors");
+			require($house2_num % 2 == 0, "2nd house num must be even");
+			require($house1.owner == $address OR $house2.owner == $address, "you are not one of the owners");
+			$elapsed_days = (timestamp - $house1.ts)/24/3600;
+			require($elapsed_days >= +$days, "too early");
+			require($elapsed_days <= $days + $followup_claim_term, "too late");
+
+			if (!$fu[$days]){
+				$fu[$days] = {first: $address, ts: timestamp};
+				$message = "Registered your request. Your neighbor must send their request within 10 minutes, otherwise you both will have to start over.";
+			}
+			else{
+				require(!$fu[$days].paid_ts, "this follow-up reward has already been paid");
+				if ($fu[$days].first == $address){
+					$fu[$days].ts = timestamp;
+					$message = "Refreshed your request. Your neighbor must send their request within 10 minutes, otherwise you both will have to start over.";
+				}
+				else{
+					$bInTime = timestamp < $fu[$days].ts + $matching_timeout;
+					if (!$bInTime){
+						$fu[$days].ts = timestamp;
+						$fu[$days].first = $address;
+						$message = "Unfortunately, you are too late. Your neighbor has to send their request again within 10 minutes, otherwise you both will have to start over.";
+					}
+					else{ // pay the reward
+						$fu[$days].paid_ts = timestamp;
+						$message = 'Paid followup rewards';
+						$event = json_stringify({type: 'followup', house1_num: $house1_num, house2_num: $house2_num, reward: $fu.reward, city: $house1.city});
+						$bPaid = true;
+					}
+				}
+			}
+
+			{
+				fu: $fu,
+				message: $message,
+				event: $event,
+				bPaid: $bPaid,
+			}
+		};
+
+		
+		$buy_shortcode = ($seller_house, $buyer_house, $seller_house_num, $buyer_house_num, $buyer_address, $amount, $variables) => {
+			require($seller_house, "no seller house");
+			require($seller_house.shortcode, "seller house has no shortcode");
+			require($seller_house.shortcode_price, "shortcode not on sale");
+			require($seller_house.amount, "seller house cannot be mayor house");
+
+			require($buyer_house.owner == $buyer_address, "not your house");
+			require(!$buyer_house.shortcode, "you already have a shortcode, release it first");
+			require($buyer_house.amount, "buyer house cannot be mayor house");
+
+			require($seller_house.shortcode_price == $amount, "wrong amount");
+			$fee = ceil($variables.shortcode_sale_fee * $seller_house.shortcode_price);
+			$net_amount = $seller_house.shortcode_price - $fee;
+			$event = json_stringify({type: 'p2p-buy-shortcode', seller_house_num: $seller_house_num, buyer_house_num: $buyer_house_num, shortcode_price: $seller_house.shortcode_price, fee: $fee, old_owner: $seller_house.owner, new_owner: $buyer_address});
+			$buyer_house.shortcode = $seller_house.shortcode; // the address linked to the shortcode stays unchanged, the buyer can edit it later
+			$seller_house.shortcode = '';
+			delete($seller_house, 'shortcode_price');
+			{
+				seller_house: $seller_house,
+				buyer_house: $buyer_house,
+				fee: $fee,
+				net_amount: $net_amount,
+				event: $event,
+			}
+		};
+
+
+
+
+	}`,
+	messages: [{
+		app: 'state',
+		state: `{
+			$buy_shortcode();
+			bounce("library only");
+		}`
+	}]
+}

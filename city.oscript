@@ -1,0 +1,1004 @@
+
+{
+	doc_url: "https://obyte.city/city.json",
+	getters: `{
+
+		/* nonce: 699727 */
+
+		$lib_aa = '3LUPAHCQMJCQDKFVZB7GFKYJMHZ5BC67';
+
+		$launch_date = '2025-01-25';
+		$fundraise_recipient = '';
+
+
+		$randomness_timeout = 1800;
+		$max_randomness_delay = 600;
+		$matching_timeout = 600;
+
+
+		$get_variables = () => {
+			var['variables'] OTHERWISE {
+				matching_probability: 0.05,
+				plot_price: 1000e9,
+				referral_boost: 0.1,
+				randomness_aa: '',
+				randomness_price: 0.001,
+				p2p_sale_fee: 0.01,
+				shortcode_sale_fee: 0.01,
+				rental_surcharge_factor: 1,
+				followup_reward_share: 0.1,
+				attestors: '',
+			}
+		};
+
+
+		$get_randomness_request = $plot_num => {
+			$plot = var['plot_'||$plot_num];
+			require($plot, "no such request");
+			$want_max_security = timestamp < $plot.ts + $max_randomness_delay;
+			return {
+			//	seed: $plot.unit,
+				want_max_security: $want_max_security,
+			};
+		};
+
+
+		$get_buy_fee = $city_name => {
+			$city = var['city_'||($city_name OTHERWISE 'city')];
+			require($city, "no such city");
+			$variables = $get_variables();
+
+			$plot_price = $city.plot_price OTHERWISE $variables.plot_price;
+			$matching_probability = $city.matching_probability OTHERWISE $variables.matching_probability;
+			$referral_boost = $city.referral_boost OTHERWISE $variables.referral_boost;
+			$buy_fee = 2 * (1 + $referral_boost) * $matching_probability / (1 - 4 * $matching_probability);
+			return $buy_fee;
+		};
+
+
+		$are_neighbors = ($plot1_num, $plot2_num, $allow_same_owner) => {
+			require($plot1_num < $plot2_num, "not ordered");
+
+			$plot1 = var['plot_'||$plot1_num];
+			require($plot1, "no such plot1");
+			require($plot1.status == 'land', "plot1 is not a vacant plot of land, can't build");
+
+			$plot2 = var['plot_'||$plot2_num];
+			require($plot2, "no such plot2");
+			require($plot2.status == 'land', "plot2 is not a vacant plot of land, can't build");
+
+			if (!$allow_same_owner){
+				require($plot1.owner != $plot2.owner, "both plots have the same owner");
+				require($plot1.username != $plot2.username, "both plots are attested to the same username");
+			}
+
+			require($plot1.city == $plot2.city, "plots must be in the same city");
+			$city_name = $plot1.city;
+			$city = var['city_'||$city_name];
+
+			// if a user matches two plots they own, they can try to circumvent self-matching by transferring one of the plots to another account. The two below rules prevent this circumvention.
+			if ($plot2.last_transfer_ts)
+				bounce("the later plot was transferred after matching");
+			if ($plot1.last_transfer_ts AND $plot1.last_transfer_ts > $plot2.ts)
+				bounce("the earlier plot was transferred after matching");
+
+			// check that no rentals were bought after plot2 to expand the matching area
+			if ($plot2.last_rental_ts)
+				bounce("the later plot was expanded by rental after matching");
+			if ($plot1.last_rental_ts AND $plot1.last_rental_ts > $plot2.ts)
+				bounce("the earlier plot was expanded by rental after matching");
+
+			$variables = $get_variables();
+			$matching_probability = $city.matching_probability OTHERWISE $variables.matching_probability;
+			$referral_boost = $city.referral_boost OTHERWISE $variables.referral_boost;
+
+			$is_referrer_match = ($plot2.ref_plot_num AND $plot2.ref_plot_num == $plot1_num) ? 1 : 0;
+			$plot1_rented_amount = ($plot1.rented_amount AND timestamp < $plot1.rental_expiry_ts) ? $plot1.rented_amount : 0;
+			// plot1 has a square around it, and plot2 is just a point that has to land within the square to be declared neighbor
+			$max_distance = sqrt(1e12 * $matching_probability * (($plot1.amount + $plot1_rented_amount) / ($city.total_land + $city.total_rented) + $is_referrer_match * $referral_boost)) / 2;
+			$bNeighbors = abs($plot1.x - $plot2.x) <= $max_distance AND abs($plot1.y - $plot2.y) <= $max_distance;
+			return $bNeighbors;
+		};
+
+	}`,
+	init: `{
+
+		$lib = $lib_aa||'';
+
+		$year = 365 * 24 * 3600;
+		
+		$followup_reward_days = {
+			'60': true,  // +2 months
+			'150': true, // +3 months
+			'270': true, // +4 months
+			'450': true, // +6 months
+			'720': true, // +9 months
+			'1080': true, // +12 months
+			'1620': true, // +18 months
+		};
+		$followup_claim_term = 10; // days
+
+		$launch_ts = parse_date($launch_date);
+		$bPrelaunch = timestamp < $launch_ts;
+
+		// presale
+		$min_contribution = 1e9;
+
+		$constants = var['constants'] OTHERWISE {};
+
+		// CITY token
+		$asset = $constants.asset;
+
+		$governance_aa = $constants.governance_aa;
+
+		$variables = $get_variables();
+
+		$state = var['state'] OTHERWISE {
+			last_plot_num: 0,
+			last_house_num: 0,
+			total_land: 0,
+		};
+
+		if ($asset)
+			$received_amount = trigger.output[[asset=($bPrelaunch AND trigger.data.buy AND !trigger.data.mayor_plot ? 'base' : $asset)]];
+
+		if (trigger.data.to AND !is_valid_address(trigger.data.to))
+			bounce("bad to address");
+		$to = trigger.data.to OTHERWISE trigger.address;
+
+		if (trigger.data.plot_num){
+			$plot_num = trigger.data.plot_num;
+			$plot = var['plot_'||$plot_num];
+			require($plot, "no such plot");
+			require($plot.status == 'land', "not a vacant plot of land");
+		}
+
+
+		$governance_base_aa = 'P5SP4B25G3XNX27MXWZBZUPZ5QXSAW7K';
+
+	}`,
+	messages: {
+		cases: [
+
+			// 0. define the token asset and initial sale AA
+			{
+				if: `{ trigger.data.define AND !$asset }`,
+				messages: [
+					{
+						app: 'asset',
+						payload: {
+							// without cap
+							is_private: false,
+							is_transferrable: true,
+							auto_destroy: false,
+							fixed_denominations: false,
+							issued_by_definer_only: true,
+							cosigned_by_definer: false,
+							spender_attested: false,
+						}
+					},
+					{ // define governance AA
+						app: 'definition',
+						payload: {
+							definition: [
+								'autonomous agent',
+								{
+									base_aa: `{$governance_base_aa}`,
+									params: {
+										city_aa: `{this_address}`,
+									}
+								}
+							]
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							$constants.asset = response_unit;
+							$constants.governance_aa = unit[response_unit].messages[[.app='definition']].payload.address;
+							var['constants'] = $constants;
+							var['city_city'] = { // the first city is called just "city"
+								count_plots: 0,
+								count_houses: 0,
+								total_land: 0,
+								total_bought: 0,
+								total_rented: 0,
+								start_ts: 0,
+								mayor: $fundraise_recipient,
+							};
+							response['asset'] = response_unit;
+						}`
+					}
+				]
+			},
+
+
+			// accept variable changes from the governance AA
+			{ 
+				if: `{ trigger.address == $governance_aa AND trigger.data.name }`, // trigger.data.value can be falsy
+				init: `{
+					$name = trigger.data.name;
+					$value = trigger.data.value;
+					$city_name = trigger.data.city;
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							if ($name == 'new_city'){
+								var['city_'||$city_name] = {
+									count_plots: 0,
+									count_houses: 0,
+									total_land: 0,
+									total_bought: 0,
+									total_rented: 0,
+									start_ts: 0,
+									mayor: trigger.data.mayor,
+								};
+							}
+							else if ($city_name){
+								$city = var['city_'||$city_name];
+								$city[$name] = $value;
+								var['city_'||$city_name] = $city;
+							}
+							else{
+								$variables[$name] = $value;
+								var['variables'] = $variables;
+							}
+						}`
+					}
+				]
+			},
+
+
+			// request to buy a plot of land
+			{
+				if: `{
+					$buy_from_balance = trigger.data.buy_from_balance;
+					($received_amount > 0 OR $buy_from_balance OR trigger.data.mayor_plot) AND trigger.data.buy
+				}`,
+				init: `{
+				//	require(timestamp > $launch_ts, "not launched yet");
+					$city_name = trigger.data.city OTHERWISE 'city';
+					$city = var['city_'||$city_name];
+					require($city, "no such city");
+					$username = attestation[[attestors=$variables.attestors, address=$to, ifnone=false]].username;
+					require($username, "your address must be attested");
+
+					$plot_price = $city.plot_price OTHERWISE $variables.plot_price;
+					$matching_probability = $city.matching_probability OTHERWISE $variables.matching_probability;
+					$referral_boost = $city.referral_boost OTHERWISE $variables.referral_boost;
+					$buy_fee = 2 * (1 + $referral_boost) * $matching_probability / (1 - 4 * $matching_probability);
+
+					$price = ceil($plot_price * (1 + $buy_fee));
+					if ($buy_from_balance){
+						require($to == trigger.address, "owner cannot be redefined when buying from balance");
+						require($received_amount == 0, "do not send coins when buying from balance");
+						$balance = var['balance_'||trigger.address] OTHERWISE 0;
+						require($balance >= $price, "not enough balance to buy");
+					}
+					else if (trigger.data.mayor_plot AND trigger.address == $city.mayor){
+						require($received_amount == 0, "do not send coins when creating a mayor plot");
+						$bMayorPlot = true;
+					}
+					else{
+						$bought_tokens = $bPrelaunch ? floor($plot_price * 0.1) : 0;
+						$expected_amount = round(($price + $bought_tokens)/($bPrelaunch ? 1000 : 1));
+						require($received_amount == $expected_amount, "incorrect amount received, expected "||$expected_amount);
+					}
+				}`,
+				messages: [
+					{
+						if: `{$bought_tokens}`,
+						app: 'payment',
+						payload: {
+							asset: `{$asset}`,
+							outputs: [{address: "{$to}", amount: "{$bought_tokens}"}]
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							if ($buy_from_balance)
+								var['balance_'||trigger.address] -= $price;
+							$new_plot_num = $state.last_plot_num + 1;
+							$state.last_plot_num = $new_plot_num;
+							$new_plot = {
+								status: 'pending',
+								amount: 0,
+								city: $city_name,
+								ts: timestamp,
+							};
+							if (!$bMayorPlot){
+								$new_plot.owner = $to;
+								$new_plot.username = $username;
+								$new_plot.amount = $plot_price;
+								if ($city.total_bought == 0)
+									$city.start_ts = timestamp;
+								$state.total_land = $state.total_land + $plot_price;
+								$city.count_plots = $city.count_plots + 1;
+								$city.total_land = $city.total_land + $plot_price;
+								$city.total_bought = $city.total_bought + $plot_price;
+								var['user_land_'||$to] += $plot_price;
+								var['user_land_'||$city_name||'_'||$to] += $plot_price;
+								$ref = trigger.data.ref;
+								if (($ref OR trigger.data.ref_plot_num) AND $received_amount){
+									if (trigger.data.ref_plot_num) // we don't check that it is valid and exists
+										$new_plot.ref_plot_num = trigger.data.ref_plot_num;
+									else{
+										require(is_valid_address($ref), "invalid referrer address");
+										$new_plot.ref = $ref;
+										$ref_plot_num = var['user_main_plot_'||$city_name||'_'||$ref];
+										if ($ref_plot_num)
+											$new_plot.ref_plot_num = $ref_plot_num;
+										else
+											response['warning'] = "The referring user has no main plot";
+									}
+								}
+							}
+							var['plot_'||$new_plot_num] = $new_plot;
+							var['city_'||$city_name] = $city;
+							var['state'] = $state;
+							response['message'] = "Order received, now wait for randomness to determine your new plot's coordinates";
+							response['plot_num'] = $new_plot_num;
+							response['event'] = json_stringify({type: 'buy', plot_num: $new_plot_num, owner: $new_plot.owner, amount: $new_plot.amount, city: $city_name, from_balance: $buy_from_balance, mayor_plot: $bMayorPlot});
+						}`
+					}
+				]
+			},
+
+
+			// receive randomness and allocate a plot of land
+			{
+				if: `{ trigger.data.rand AND trigger.data.req_id AND trigger.address == $variables.randomness_aa }`,
+				init: `{
+					$new_plot_num = trigger.data.req_id;
+					$new_plot = var['plot_'||$new_plot_num];
+					require($new_plot.status == 'pending', "plot already received");
+					$new_plot.status = 'land';
+					// assign coordinates
+					$n = number_from_seed(trigger.data.rand, 1e12 - 1);
+					$x = floor($n / 1e6);
+					$y = $n % 1e6;
+					$new_plot.x = $x;
+					$new_plot.y = $y;
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							var['plot_'||$new_plot_num] = $new_plot.amount ? $new_plot : false;
+							$city_name = $new_plot.city;
+							if ($new_plot.amount){
+								response['event'] = json_stringify({type: 'allocate', plot_num: $new_plot_num, x: $x, y: $y, city: $city_name});
+							}
+							else{ // free plot created by the mayor
+								$state.last_house_num = $state.last_house_num + 2;
+								var['house_'||$state.last_house_num] = {
+									plot_num: $new_plot_num,
+									// owner: none
+									amount: 0,
+									city: $city_name,
+									x: $x,
+									y: $y,
+									ts: timestamp,
+									plot_ts: $new_plot.ts,
+									info: $new_plot.info,
+								};
+								var['state'] = $state;
+								response['event'] = json_stringify({type: 'house', house_num: $state.last_house_num, plot_num: $new_plot_num, amount: 0, x: $x, y: $y, city: $city_name});
+							}
+							$city = var['city_'||$city_name];
+							var['rand_provider_balance_'||$variables.randomness_aa] += floor(($new_plot.amount OTHERWISE $city.plot_price OTHERWISE $variables.plot_price) * $variables.randomness_price);
+						}`
+					}
+				]
+			},
+
+
+			// withdraw rand provider eranings
+			{
+				if: `{
+					$randomness_aa = trigger.data.randomness_aa;
+					trigger.data.withdraw_rand_provider_earnings AND $randomness_aa
+				}`,
+				init: `{
+					$balance = var['rand_provider_balance_'||$randomness_aa];
+					require($balance, "no balance");
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: {
+							asset: '{$asset}',
+							outputs: [{address: '{$randomness_aa}', amount: '{$balance}'}]
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							var['rand_provider_balance_'||$randomness_aa] = 0;
+						}`
+					}
+				]
+			},
+
+
+			// leave an unbuilt plot of land
+			{
+				if: `{trigger.data.leave AND $plot_num}`,
+				init: `{
+					require($plot.owner == trigger.address, "you are not the owner");
+					$amount = $plot.amount;
+					$city_name = $plot.city;
+					$city = var['city_'||$city_name];
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: {
+							asset: '{$asset}',
+							outputs: [{address: '{trigger.address}', amount: '{$amount}'}]
+						}
+					},
+					{
+						app: 'payment',
+						payload: {
+							asset: 'base',
+							outputs: [{address: '{$governance_aa}', amount: 1000}]
+						}
+					},
+					{
+						app: 'data',
+						payload: {
+							update_user_balance: 1,
+							address: `{trigger.address}`,
+							city: `{$city_name}`,
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							var['plot_'||$plot_num] = false;
+							$city.count_plots = $city.count_plots - 1;
+							$city.total_land = $city.total_land - $amount;
+							$state.total_land = $state.total_land - $amount;
+							var['city_'||$city_name] = $city;
+							var['user_land_'||trigger.address] -= $amount;
+							var['user_land_'||$city_name||'_'||trigger.address] -= $amount;
+							var['state'] = $state;
+							response['message'] = "Left plot";
+							response['event'] = json_stringify({type: 'leave', plot_num: $plot_num, city: $city_name});
+						}`
+					}
+				]
+			},
+
+
+			// build houses on two neighboring plots and get 4 new plots
+			{
+				if: `{
+					$plot1_num = trigger.data.plot1_num;
+					$plot2_num = trigger.data.plot2_num;
+					trigger.data.build AND $plot1_num AND $plot2_num
+				}`,
+				init: `{
+					require($plot1_num < $plot2_num, "not ordered");
+
+					$plot1 = var['plot_'||$plot1_num];
+					require($plot1, "no such plot1");
+					require($plot1.status == 'land', "plot1 is not a vacant plot of land, can't build");
+					$owner1 = $plot1.owner;
+					$bOwnerOf1 = $owner1 == trigger.address;
+
+					$plot2 = var['plot_'||$plot2_num];
+					require($plot2, "no such plot2");
+					require($plot2.status == 'land', "plot2 is not a vacant plot of land, can't build");
+					$owner2 = $plot2.owner;
+					$bOwnerOf2 = $owner2 == trigger.address;
+
+					require($bOwnerOf1 OR $bOwnerOf2, "you are not the owner of any plot");
+					if ($bOwnerOf1 AND $bOwnerOf2)
+						bounce("you are the owner of both plots");
+					require($plot1.username != $plot2.username, "both plots are attested to the same username");
+
+					require($plot1.city == $plot2.city, "plots must be in the same city");
+					$city_name = $plot1.city;
+					$city = var['city_'||$city_name];
+
+					// if a user matches two plots they own, they can try to circumvent self-matching by transferring one of the plots to another account. The two below rules prevent this circumvention.
+					if ($plot2.last_transfer_ts)
+						bounce("the later plot was transferred after matching");
+					if ($plot1.last_transfer_ts AND $plot1.last_transfer_ts > $plot2.ts)
+						bounce("the earlier plot was transferred after matching");
+
+					// check that no rentals were bought after plot2 to expand the matching area
+					if ($plot2.last_rental_ts)
+						bounce("the later plot was expanded by rental after matching");
+					if ($plot1.last_rental_ts AND $plot1.last_rental_ts > $plot2.ts)
+						bounce("the earlier plot was expanded by rental after matching");
+
+					$matching_probability = $city.matching_probability OTHERWISE $variables.matching_probability;
+					$referral_boost = $city.referral_boost OTHERWISE $variables.referral_boost;
+
+					$is_referrer_match = ($plot2.ref_plot_num AND $plot2.ref_plot_num == $plot1_num) ? 1 : 0;
+					$plot1_rented_amount = ($plot1.rented_amount AND timestamp < $plot1.rental_expiry_ts) ? $plot1.rented_amount : 0;
+					// plot1 has a square around it, and plot2 is just a point that has to land within the square to be declared neighbor
+					$max_distance = sqrt(1e12 * $matching_probability * (($plot1.amount + $plot1_rented_amount) / ($city.total_land + $city.total_rented) + $is_referrer_match * $referral_boost)) / 2;
+					$bNeighbors = abs($plot1.x - $plot2.x) <= $max_distance AND abs($plot1.y - $plot2.y) <= $max_distance;
+					require($bNeighbors, "not neighbors");
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							$key = 'match_'||$plot1_num||'_'||$plot2_num;
+							$match = var[$key];
+							if (!$match){
+								$new_match = {first: trigger.address, ts: timestamp};
+								response['message'] = "Registered your request. Your neighbor must send their request within 10 minutes, otherwise you both will have to start over.";
+							}
+							else{
+								require(!$match.built_ts, "houses already built");
+								if ($match.first == trigger.address){
+									$match.ts = timestamp;
+									response['message'] = "Refreshed your request. Your neighbor must send their request within 10 minutes, otherwise you both will have to start over.";
+								}
+								else{
+									$bInTime = timestamp < $match.ts + $matching_timeout;
+									if (!$bInTime){
+										$match.ts = timestamp;
+										$match.first = trigger.address;
+										response['message'] = "Unfortunately, you are too late. Your neighbor has to send their request again within 10 minutes, otherwise you both will have to start over.";
+									}
+									else{ // build houses and allocate new plots
+										$match.built_ts = timestamp;
+										$amount = min($plot1.amount, $plot2.amount);
+										$plot1.amount = $plot1.amount - $amount;
+										$plot2.amount = $plot2.amount - $amount;
+										$house1_num = $state.last_house_num + 1;
+										$house2_num = $house1_num + 1;
+										$state.last_house_num = $house2_num;
+										var['house_'||$house1_num] = {
+											plot_num: $plot1_num,
+											owner: $owner1,
+											amount: $amount,
+											city: $city_name,
+											x: $plot1.x,
+											y: $plot1.y,
+											ts: timestamp,
+											plot_ts: $plot1.ts,
+											info: $plot1.info,
+										};
+										var['house_'||$house2_num] = {
+											plot_num: $plot2_num,
+											owner: $owner2,
+											amount: $amount,
+											city: $city_name,
+											x: $plot2.x,
+											y: $plot2.y,
+											ts: timestamp,
+											plot_ts: $plot2.ts,
+											info: $plot2.info,
+										};
+										$events = [
+											{type: 'house', house_num: $house1_num, plot_num: $plot1_num, owner: $owner1, amount: $amount, city: $city_name, x: $plot1.x, y: $plot1.y},
+											{type: 'house', house_num: $house2_num, plot_num: $plot2_num, owner: $owner2, amount: $amount, city: $city_name, x: $plot2.x, y: $plot2.y},
+										];
+
+										var['plot_'||$plot1_num] = ($plot1.amount == 0) ? false : $plot1;
+										var['plot_'||$plot2_num] = ($plot2.amount == 0) ? false : $plot2;
+
+										$lost_rented_amount = (($plot1.amount == 0 AND $plot1.rented_amount) ? $plot1.rented_amount : 0) + (($plot2.amount == 0 AND $plot2.rented_amount) ? $plot2.rented_amount : 0);
+										if ($lost_rented_amount)
+											$city.total_rented = $city.total_rented - $lost_rented_amount;
+
+										// create 4 new plots
+										$p1 = {
+											status: 'pending',
+											owner: $owner1,
+											username: $plot1.username,
+											amount: $amount,
+											city: $city_name,
+											ts: timestamp,
+										};
+										$p2 = {
+											status: 'pending',
+											owner: $owner2,
+											username: $plot2.username,
+											amount: $amount,
+											city: $city_name,
+											ts: timestamp,
+										};
+										$last_plot_num = $state.last_plot_num;
+										foreach([1,2,3,4], 4, $offset => {
+											$new_plot_num = $last_plot_num + $offset;
+											$p = $offset <= 2 ? $p1 : $p2;
+											var['plot_'||$new_plot_num] = $p;
+											$events[] = {type: 'reward', plot_num: $new_plot_num, owner: $p.owner, amount: $amount, city: $city_name};
+										});
+
+										// reassign main plot num if it has just been built upon
+										$main_plot_num1 = var['user_main_plot_'||$city_name||'_'||$owner1];
+										$main_plot_num2 = var['user_main_plot_'||$city_name||'_'||$owner2];
+										if ($main_plot_num1 AND $main_plot_num1 == $plot1_num)
+											var['user_main_plot_'||$city_name||'_'||$owner1] = $last_plot_num + 1;
+										if ($main_plot_num2 AND $main_plot_num2 == $plot2_num)
+											var['user_main_plot_'||$city_name||'_'||$owner2] = $last_plot_num + 3;
+										
+										$state.last_plot_num = $last_plot_num + 4;
+										$state.total_land = $state.total_land + 2 * $amount;
+										$city.count_plots = $city.count_plots + 2;
+										$city.count_houses = $city.count_houses + 2;
+										$city.total_land = $city.total_land + 2 * $amount;
+									//	$city.total_bought = $city.total_bought + 2 * $amount;
+										var['city_'||$city_name] = $city;
+										var['state'] = $state;
+										var['user_houses_'||$owner1] += 1;
+										var['user_houses_'||$owner2] += 1;
+										var['user_houses_'||$city_name||'_'||$owner1] += 1;
+										var['user_houses_'||$city_name||'_'||$owner2] += 1;
+										var['user_land_'||$owner1] += $amount;
+										var['user_land_'||$owner2] += $amount;
+										var['user_land_'||$city_name||'_'||$owner1] += $amount;
+										var['user_land_'||$city_name||'_'||$owner2] += $amount;
+
+										response['message'] = "Now you've built a house on your land and will receive two new plots of land. Please wait a few minutes for the plots to be randomly allocated.";
+										response['events'] = json_stringify($events);
+									}
+								}
+							}
+							var[$key] = $match OTHERWISE $new_match;
+						}`
+					}
+				]
+			},
+
+
+			// put a plot of land on sale
+			{
+				if: `{trigger.data.sell AND $plot_num}`,
+				init: `{
+					$sale_price = trigger.data.sale_price;
+					require($plot.owner == trigger.address, "you are not the owner");
+					require($sale_price > $plot.amount OR $sale_price == 0, "bad sale price");
+				}`,
+				messages: [{
+					app: 'state',
+					state: `{
+						response['message'] = $sale_price ? 'Put on sale' : 'Withdrawn from sale';
+						response['event'] = json_stringify({type: 'p2p-sell', plot_num: $plot_num, sale_price: $sale_price});
+						$plot.sale_price = $sale_price;
+						var['plot_'||$plot_num] = $plot;
+					}`
+				}]
+			},
+
+
+			// p2p buy a plot of land
+			// or
+			// transfer a plot of land to trigger.data.to address
+			{
+				if: `{
+					$p2p_buy = trigger.data.p2p_buy AND $received_amount > 0;
+					$plot_num AND (trigger.data.transfer OR $p2p_buy)
+				}`,
+				init: `{
+					if ($p2p_buy){
+						require($plot.owner != trigger.address, "you are already the owner");
+						require($plot.sale_price, "not on sale");
+						require($plot.sale_price == $received_amount, "wrong amount");
+						$fee = ceil($variables.p2p_sale_fee * $plot.sale_price);
+					}
+					else{ // transfer
+						require($plot.owner == trigger.address, "you are not the owner");
+						require($to != $plot.owner, "same owner");
+					}
+					$old_owner = $plot.owner;
+				}`,
+				messages: [
+					{
+						if: `{$p2p_buy}`,
+						app: 'payment',
+						payload: {
+							asset: "{$asset}",
+							outputs: [{address: "{$old_owner}", amount: "{$received_amount - $fee}"}]
+						}
+					},
+					{
+						app: 'payment',
+						payload: {
+							asset: 'base',
+							outputs: [{address: '{$governance_aa}', amount: 1000}]
+						}
+					},
+					{
+						app: 'data',
+						payload: {
+							update_user_balance: 1,
+							address: `{$old_owner}`,
+							city: `{$plot.city}`,
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							if ($p2p_buy){
+								$new_owner = trigger.address;
+								response['message'] = 'Bought';
+								response['event'] = json_stringify({type: 'p2p-buy', plot_num: $plot_num, amount: $plot.amount, sale_price: $received_amount, fee: $fee, old_owner: $old_owner, new_owner: $new_owner});
+							}
+							else{ // transfer
+								$new_owner = $to;
+								response['message'] = 'Transferred';
+								response['event'] = json_stringify({type: 'transfer', plot_num: $plot_num, old_owner: $old_owner, new_owner: $to});
+							}
+							$plot.owner = $new_owner;
+							$plot.last_transfer_ts = timestamp;
+							delete($plot, 'sale_price');
+							// if the plot had a rental, it stays with the plot
+							var['plot_'||$plot_num] = $plot;
+							var['user_land_'||$new_owner] += $plot.amount;
+							var['user_land_'||$old_owner] -= $plot.amount;
+							var['user_land_'||$plot.city||'_'||$new_owner] += $plot.amount;
+							var['user_land_'||$plot.city||'_'||$old_owner] -= $plot.amount;
+						}`
+					}
+				]
+			},
+
+
+			// rent additional land around your plot
+			{
+				if: `{
+					$rented_amount = trigger.data.rented_amount;
+					trigger.data.rent AND $plot_num AND $rented_amount AND $received_amount > 0
+				}`,
+				init: `{
+					require($plot.owner == trigger.address, "you are not the owner");
+					$city = var['city_'||$plot.city];
+					$matching_probability = $city.matching_probability OTHERWISE $variables.matching_probability;
+					$plot_price = $city.plot_price OTHERWISE $variables.plot_price;
+
+					$count_bought = $city.total_bought / $plot_price;
+					require($count_bought > 10, "too few plots bought yet"); // to make count_buys_next_year estimate reliable
+					$total_working = $city.total_land + $city.total_rented + $rented_amount - $plot.rented_amount;
+					$elapsed = timestamp - $city.start_ts;
+					if ($plot.rented_amount AND timestamp < $plot.rental_expiry_ts){
+						require($rented_amount >= $plot.rented_amount, "rental ammount cannot be decreased");
+						$unused_rent = floor($plot.rented_amount * ($plot.rental_expiry_ts - timestamp) / $year);
+					}
+					$count_buys_next_year = $year/$elapsed * $count_bought;
+					// income is overestimated if rental amount is large while $plot.amount is small, then the $plot.amount would be used in full before the year expires
+					$income_from_one_buy = 2 * $plot_price * $matching_probability * $rented_amount/$total_working; // "2" because there are two users, each earns one additional plot
+					$year_income = $income_from_one_buy * $count_buys_next_year;
+					$rental_fee = ceil($variables.rental_surcharge_factor * $year_income);
+					$required_fee = $rental_fee - $unused_rent;
+					$excess = $received_amount - $required_fee;
+					require($excess >= 0, "not enough paid for rental fee, required "||$required_fee);
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: {
+							asset: "{$asset}",
+							outputs: [{address: "{trigger.address}", amount: "{$excess}"}]
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							response['message'] = 'Rented';
+							$city.total_rented = $city.total_rented + $rented_amount - $plot.rented_amount;
+							var['city_'||$plot.city] = $city;
+							$plot.rented_amount = $rented_amount;
+							$plot.rental_expiry_ts = timestamp + $year;
+							response['event'] = json_stringify({type: 'rent', plot_num: $plot_num, rented_amount: $rented_amount, rental_expiry_ts: $plot.rental_expiry_ts, rental_fee: $rental_fee});
+							var['plot_'||$plot_num] = $plot;
+						}`
+					}
+				]
+			},
+
+
+			// end rental, called by anyone
+			{
+				if: `{trigger.data.end_rental AND $plot_num}`,
+				init: `{
+					require($plot.rented_amount AND timestamp > $plot.rental_expiry_ts, "rental is still active");
+					$city = var['city_'||$plot.city];
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							response['message'] = 'Ended rental';
+							$city.total_rented = $city.total_rented - $plot.rented_amount;
+							var['city_'||$plot.city] = $city;
+							response['event'] = json_stringify({type: 'end_rental', plot_num: $plot_num, rented_amount: $plot.rented_amount});
+							$plot.rented_amount = 0;
+							var['plot_'||$plot_num] = $plot;
+						}`
+					}
+				]
+			},
+
+
+			// claim follow-up reward
+			{
+				if: `{
+					$days = trigger.data.days;
+					$house1_num = trigger.data.house1_num;
+					$house2_num = trigger.data.house2_num;
+					trigger.data.followup AND $days AND $house1_num AND $house2_num
+				}`,
+				init: `{
+					require($followup_reward_days[$days], "no such follow-up");
+					$house1 = var['house_'||$house1_num];
+					$house2 = var['house_'||$house2_num];
+
+					$key = 'followup_'||$house1_num||'_'||$house2_num;
+					// the follow-up reward share might be changed by governance but it affects only future followups
+					$fu = var[$key] OTHERWISE {reward: floor($variables.followup_reward_share * $house1.amount)};
+
+					$res = $lib#0.$claim_followup_reward($house1, $house2, $house1_num, $house2_num, $days||'', trigger.address, $followup_claim_term, $matching_timeout, $fu);
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							response['message'] = $res.message;
+							if ($res.bPaid){
+								var['balance_'||$house1.owner] += $fu.reward;
+								var['balance_'||$house2.owner] += $fu.reward;
+								response['event'] = $res.event;
+							}
+							var[$key] = $res.fu; // $res.fu is the modified $fu
+						}`
+					}
+				]
+			},
+
+
+			// edit house
+			{
+				if: `{trigger.data.edit_house AND trigger.data.house_num}`,
+				init: `{
+					$house_num = trigger.data.house_num;
+					$house = var['house_'||$house_num];
+					require($house, "no such house");
+					$city = var['city_'||$house.city];
+					require($house.owner AND $house.owner == trigger.address OR $house.amount == 0 AND $city.mayor == trigger.address, "you are not the owner");
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							$shortcode = trigger.data.shortcode;
+							if (($shortcode OR trigger.data.release_shortcode) AND $house.shortcode){
+								var['shortcode_'||$house.shortcode] = false; // release the old shortcode first
+								$house.shortcode = '';
+							}
+							if ($shortcode){
+								require($house.amount, "mayor houses cannot be assigned shortcodes");
+								require($house.amount >= $variables.plot_price, "the plot is too cheap");
+								require(typeof($shortcode) == 'string', "shortcode must be a string");
+								require(!var['shortcode_'||$shortcode], "this shortcode is already taken");
+							//	if (trigger.data.address)
+							//		require(is_valid_address(trigger.data.address), "address not valid");
+							//	$address = trigger.data.address OTHERWISE trigger.address;
+								var['shortcode_'||$shortcode] = $to;
+								$house.shortcode = $shortcode;
+							}
+							if (trigger.data.sell_shortcode AND is_integer(trigger.data.shortcode_price) AND trigger.data.shortcode_price >= 0)
+								$house.shortcode_price = trigger.data.shortcode_price; // 0 removes the shortcode from sale
+							if (exists(trigger.data.new_owner) AND $house.amount == 0){ // assign a manager of a mayor house
+								$house.owner = trigger.data.new_owner;
+							}
+							if (trigger.data.info)
+								$house.info = trigger.data.info;
+							response['message'] = 'Edited house';
+							response['event'] = json_stringify({type: 'edit_house', house_num: $house_num, info: trigger.data.info, shortcode: $shortcode, release_shortcode: trigger.data.release_shortcode});
+							var['house_'||$house_num] = $house;
+						}`
+					}
+				]
+			},
+
+
+			// p2p buy a shortcode
+			{
+				if: `{
+					$seller_house_num = trigger.data.seller_house_num;
+					$my_house_num = trigger.data.my_house_num;
+					trigger.data.p2p_buy_shortcode AND $seller_house_num AND $my_house_num AND $received_amount > 0
+				}`,
+				init: `{
+					$seller_house = var['house_'||$seller_house_num];
+					$my_house = var['house_'||$my_house_num];
+
+					$res = $lib#0.$buy_shortcode($seller_house, $my_house, $seller_house_num, $my_house_num, trigger.address, $received_amount, $variables);
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: {
+							asset: "{$asset}",
+							outputs: [{address: "{$seller_house.owner}", amount: "{$res.net_amount}"}]
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							response['message'] = 'Bought shortcode';
+							response['event'] = $res.event;
+							var['house_'||$seller_house_num] = $res.seller_house;
+							var['house_'||$my_house_num] = $res.buyer_house;
+						}`
+					}
+				]
+			},
+
+
+			// edit plot
+			{
+				if: `{trigger.data.edit_plot AND $plot_num AND trigger.data.info}`,
+				init: `{
+					require($plot.owner == trigger.address, "you are not the owner");
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							$plot.info = trigger.data.info;
+							response['message'] = 'Edited plot';
+							response['event'] = json_stringify({type: 'edit_plot', plot_num: $plot_num, info: trigger.data.info});
+							var['plot_'||$plot_num] = $plot;
+						}`
+					}
+				]
+			},
+
+
+			// edit user
+			{
+				if: `{trigger.data.edit_user AND (trigger.data.info OR trigger.data.main_plot_num)}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							if (trigger.data.main_plot_num){
+								$main_plot = var['plot_'||trigger.data.main_plot_num];
+								require($main_plot, "no such plot");
+								require($main_plot.owner == trigger.address, "you are not the owner");
+								var['user_main_plot_'||$main_plot.city||'_'||trigger.address] = trigger.data.main_plot_num;
+							}
+							if (trigger.data.info)
+								var['user_'||trigger.address] = trigger.data.info;
+							response['message'] = 'Edited user profile';
+							response['event'] = json_stringify({type: 'edit_user', address: trigger.address, info: trigger.data.info, main_plot_num: trigger.data.main_plot_num});
+						}`
+					}
+				]
+			},
+
+
+			// withdraw the fundraise
+			{
+				if: `{trigger.data.withdraw_fundraise AND trigger.data.amount AND trigger.address == $fundraise_recipient}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: {
+							asset: "base",
+							outputs: [{address: "{trigger.address}", amount: "{trigger.data.amount}"}],
+						}
+					}
+				]
+			},
+
+
+
+		]
+	}
+}

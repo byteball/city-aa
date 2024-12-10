@@ -1,0 +1,224 @@
+{
+	doc_url: "https://obyte.city/governance.json",
+	init: `{
+
+		$challenging_period = params.challenging_period OTHERWISE 3*24*3600; // 3 days
+
+		$city_aa = params.city_aa;
+		require($city_aa, "no city_aa");
+
+		$min_majority_for_new_city = 0.75;
+
+		$names = [
+			'matching_probability',
+			'plot_price',
+			'referral_boost',
+			'randomness_aa',
+			'randomness_price',
+			'p2p_sale_fee',
+			'shortcode_sale_fee',
+			'rental_surcharge_factor',
+			'followup_reward_share',
+			'attestors',
+			'new_city',
+			'mayor',
+		];
+		$count_names = 12;
+		require(length($names) == $count_names, "wrong number of governable parameters");
+		
+		$is_allowed_name = $name => {
+			length(filter($names, $count_names, $n => $n == $name)) == 1
+		};
+
+		$per_city_names = {
+			matching_probability: true,
+			plot_price: true,
+			referral_boost: true,
+			mayor: true,
+		};
+
+		$get_value_key = $value => $value;
+
+	}`,
+	messages: {
+		cases: [
+
+			// commit new value after the challenging period expires
+			{
+				if: `{ trigger.data.name AND trigger.data.commit }`,
+				init: `{
+					$name = trigger.data.name;
+					$city = trigger.data.city;
+					if ($name == 'new_city'){
+						$mayor = trigger.data.mayor;
+						require($city, "city name not provided");
+						require(is_valid_address($mayor), "mayor address not valid");
+						require(!var[$city_aa]['city_'||$city], "this city already exists");
+						$full_name = $name||'|'||$city||'|'||$mayor;
+					}
+					else if ($per_city_names[$name] AND $city)
+						$full_name = $name||'|'||$city;
+					else
+						$full_name = $name;
+					$leader = var['leader_' || $full_name];
+					require(exists($leader), "no leader"); // can be 0
+					$current_value = var[$full_name];
+					if (exists($current_value) AND $leader == $current_value)
+						bounce("already equal to leader");
+					require(var['challenging_period_start_ts_' || $full_name] + $challenging_period < timestamp, "challenging period not expired yet");
+					$payload = {
+						name: $name,
+						value: $leader,
+					};
+					if ($city)
+						$payload.city = $city;
+					if ($name == 'new_city'){
+						require($leader == 'yes', "leader must be yes");
+						$state = var[$city_aa]['state'];
+						require(var['support_' || $full_name || '_yes'] / $state.total_land > $min_majority_for_new_city, "this decision requires a "||($min_majority_for_new_city*100)||"% majority");
+						$payload.mayor = $mayor;
+					}
+				}`,
+				messages: [
+					// ping the city_aa to record the new value
+					{
+						app: 'payment',
+						payload: {
+							asset: 'base',
+							outputs: [
+								{address: "{$city_aa}", amount: 5000}
+							]
+						}
+					},
+					{
+						app: 'data',
+						payload: "{$payload}"
+					},
+					{
+						app: 'state',
+						state: `{
+							var[$full_name] = $leader;
+						}`
+					}
+				]
+			},
+
+
+			// add support to a value
+			{ 
+				if: `{ trigger.data.name }`,
+				init: `{
+					$name = trigger.data.name;
+					$value = trigger.data.value; // can be empty to remove one's vote
+					require($is_allowed_name($name), "unknown name: " || $name);
+					$city = trigger.data.city;
+					if ($city){
+						require(!contains($city, '|'), "| not allowed in city name");
+						require($per_city_names[$name] OR $name == 'new_city', "this is not a per-city variable");
+						if ($name != 'new_city')
+							require(var[$city_aa]['city_'||$city], "no such city");
+					}
+					if ($name == 'mayor' AND !$city) bounce("mayor without a city");
+					$bCityVote = $per_city_names[$name] AND $city; // else global vote
+
+					$balance = var[$city_aa]['user_land_' || ($bCityVote ? $city||'_' : '') || trigger.address];
+					require($balance, "you have no land and cannot vote");
+
+					if (exists($value)){
+						if ($name == 'randomness_aa' OR $name == 'attestors' OR $name == 'new_city' OR $name == 'mayor'){
+							require(typeof($value) == 'string', "must be a string");
+							if ($name == 'randomness_aa')
+								require(is_aa($value), "not an AA");
+							else if ($name == 'mayor')
+								require(is_valid_address($value), "mayor address not valid");
+							else if ($name == 'attestors'){
+								$arr = split($value, ':');
+								require(length($arr) > 0, "no attestors");
+								foreach($arr, 5, $addr => { require(is_valid_address($addr), "invalid atestor address"); });
+							}
+							else if ($name == 'new_city'){
+								require($value == 'yes' OR $value == 'no', "value must be yes or no");
+								$mayor = trigger.data.mayor;
+								require($city, "city name not provided");
+								require(length($city) <= 20, "new city name is too long");
+								require(is_valid_address($mayor), "mayor address not valid");
+								require(!var[$city_aa]['city_'||$city], "this city already exists");
+							}
+						}
+						else{
+							require(typeof($value) == 'number' AND $value > 0, "must be a positive number");
+							if ($name == 'matching_probability')
+								require($value < 1/4, "must be < 1/4"); // 1-4p denominator must be positive
+							if ($name == 'randomness_price' OR $name == 'p2p_sale_fee' OR $name == 'shortcode_sale_fee' OR $name == 'followup_reward_share')
+								require($value < 1, "must be <1");
+							else if ($name == 'plot_price')
+								require(is_integer($value), "must be integer");
+							else if ($name == 'rental_surcharge_factor')
+								require($value >= 1, "must be >=1");
+						}
+						$full_name = ($name == 'new_city') ? ($name||'|'||$city||'|'||$mayor) : ($city ? $name||'|'||$city : $name);
+					}
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							$votes = var['votes_'||trigger.address] OTHERWISE {};
+							$prev_choice = $votes[$full_name];
+							$leader = var['leader_' || $full_name];
+							var['choice_' || trigger.address || '_' || $full_name] = $value;
+							if (exists($prev_choice)){
+								$prev_choice_key = $get_value_key($prev_choice.value);
+								var['support_' || $full_name || '_' || $prev_choice_key] -= $prev_choice.balance;
+								delete($votes, $full_name);
+							}
+							if (exists($value)){
+								$value_key = $get_value_key($value);
+								var['support_' || $full_name || '_' || $value_key] += $balance;
+								$votes[$full_name] = { value: $value, balance: $balance };
+								if (!exists($leader) OR var['support_' || $full_name || '_' || $value_key] > var['support_' || $full_name || '_' || $get_value_key($leader)]){
+									var['leader_' || $full_name] = $value;
+									var['challenging_period_start_ts_' || $full_name] = timestamp;
+								}
+							}
+							var['votes_'||trigger.address] = $votes;
+						}`
+					}
+				]
+			},
+
+
+			// update user balance
+			{
+				if: `{ trigger.data.update_user_balance AND trigger.data.address AND trigger.data.city }`,
+				init: `{
+				}`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							$votes = var['votes_'||trigger.data.address];
+							if (!$votes) return;
+							$balance = var[$city_aa]['user_land_' || trigger.data.address];
+							$city_balance = var[$city_aa]['user_land_' || trigger.data.city || '_' || trigger.data.address];
+							foreach($votes, $count_names, ($name, $vote) => {
+								$value_key = $get_value_key($vote.value);
+								$parts = split($name, '|');
+								if (length($parts) == 2){ // new_city has 3 parts and is a global vote
+									if ($parts[1] != trigger.data.city) return; // vote for another city
+									$bInThisCity = true;
+								}
+								$new_balance = $bInThisCity ? $city_balance : $balance;
+								var['support_' || $name || '_' || $value_key] += $new_balance - $vote.balance;
+								$votes[$name].balance = $new_balance;
+							});
+							var['votes_'||trigger.data.address] = $votes;
+						}`
+					}
+				]
+			},
+
+
+		]
+	}
+}

@@ -1,0 +1,145 @@
+
+{
+	doc_url: "https://obyte.city/random.json",
+	getters: `{
+
+		/* nonce: 29566482 */
+
+	}`,
+	init: `{
+
+	}`,
+	messages: {
+		cases: [
+
+			// accept randomness
+			{
+				if: `{ trigger.data.req_id AND trigger.data.proof AND trigger.data.consumer_aa }`,
+				init: `{
+					$req_id = trigger.data.req_id;
+					$consumer_aa = trigger.data.consumer_aa;
+					$seed = $consumer_aa || '-' || $req_id;
+					$proof = trigger.data.proof; // the proof is actually a RSA signature
+					$pub_key = params.vrf_providers[trigger.address];
+					require($pub_key, "you are not a VRF provider");
+					$req = $consumer_aa#2.$get_randomness_request($req_id);
+					require(vrf_verify($seed, $proof, $pub_key), "bad proof");
+					$proof_key = 'proof_hashes_'||$seed||'_'||trigger.address;
+					require(!var[$proof_key], "already submitted");
+					require(!var['finished_'||$seed], "already finished");
+					$proof_hash = sha256($proof);
+					if (trigger.address == params.finishing_provider){
+						$acc = {count_missing: 0, proofs: ''};
+						foreach(params.vrf_providers, 10, ($address, $pk) => {
+							if ($address == trigger.address)
+								$acc.proofs = $acc.proofs || $proof_hash;
+							else{
+								$ph = var['proof_hashes_'||$seed||'_'||$address];
+								if ($ph)
+									$acc.proofs = $acc.proofs || $ph;
+								else
+									$acc.count_missing = $acc.count_missing + 1;
+							}
+						});
+						$bFinished = $acc.count_missing == 0 OR !$req.want_max_security;
+						if ($bFinished)
+							$rand = sha256($acc.proofs);
+					}
+				}`,
+				messages: [
+					{
+						if: "{$bFinished}",
+						app: 'payment',
+						payload: {
+							asset: 'base',
+							outputs: [{address: "{$consumer_aa}", amount: 500}]
+						}
+					},
+					{
+						if: "{$bFinished}",
+						app: 'data',
+						payload: {
+							req_id: "{$req_id}",
+							rand: "{$rand}"
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							if ($bFinished){
+								var['finished_'||$seed] = 1;
+								// cleanup
+								foreach(params.vrf_providers, 10, ($address, $pk) => {
+									var['proof_hashes_'||$seed||'_'||$address] = false;
+								});
+							}
+							else
+								var[$proof_key] = $proof_hash;
+							var['bounce_fees_'||trigger.address] += 10000;
+							var['total_bounce_fees'] += 10000;
+						}`
+					}
+				]
+			},
+
+
+			// withdraw the earnings
+			{
+				if: `{ trigger.data.withdraw AND trigger.data.asset }`,
+				init: `{
+					$asset = trigger.data.asset;
+					$balance = balance[$asset] - ($asset == 'base' ? var['total_bounce_fees'] : 0);
+					$count_nonfinishing = length(params.vrf_providers) - 1;
+					$outputs = map(keys(params.vrf_providers), 10, ($address) => ({
+						address: $address, 
+						amount: floor($address == params.finishing_provider ? $balance/($count_nonfinishing == 0 ? 1 : 2) : $balance/2/$count_nonfinishing)
+					}));
+					$payload = {asset: $asset, outputs: $outputs};
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: "{$payload}"
+					},
+				]
+			},
+
+			// withdraw the bounce fees
+			{
+				if: `{ trigger.data.withdraw_bounce_fees }`,
+				init: `{
+					$pub_key = params.vrf_providers[trigger.address];
+					require($pub_key, "you are not a VRF provider");
+					$balance = var['bounce_fees_'||trigger.address];
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: {
+							asset: 'base',
+							outputs: [{address: "{trigger.address}", amount: "{floor($balance * 0.8)}"}]
+						}
+					},
+					{
+						app: 'state',
+						state: `{
+							var['bounce_fees_'||trigger.address] = 0;
+							var['total_bounce_fees'] -= $balance;
+						}`
+					}
+				]
+			},
+
+			// accept the earnings in whatever asset
+			{
+				messages: [{
+					app: 'state',
+					state: `{
+						response['message'] = 'Accepted';
+					}`
+				}]
+			}
+
+		]
+	}
+}
