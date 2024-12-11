@@ -3,7 +3,7 @@
 	doc_url: "https://obyte.city/city.json",
 	getters: `{
 
-		/* nonce: 699727 */
+		/* nonce: 3910404 */
 
 		$lib_aa = '3LUPAHCQMJCQDKFVZB7GFKYJMHZ5BC67';
 
@@ -35,9 +35,11 @@
 		$get_randomness_request = $plot_num => {
 			$plot = var['plot_'||$plot_num];
 			require($plot, "no such request");
+			require($plot.status == 'pending', "plot already allocated");
 			$want_max_security = timestamp < $plot.ts + $max_randomness_delay;
 			return {
 			//	seed: $plot.unit,
+				ts: $plot.ts,
 				want_max_security: $want_max_security,
 			};
 		};
