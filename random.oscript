@@ -3,7 +3,7 @@
 	doc_url: "https://obyte.city/random.json",
 	getters: `{
 
-		/* nonce: 29566482 */
+		/* nonce: 163108 */
 
 	}`,
 	init: `{

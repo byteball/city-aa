@@ -9,8 +9,14 @@ process.on('unhandledRejection', up => {
 	throw up;
 });
 
+const file = process.argv[2];
+const prefix = process.argv[3];
+if (!prefix) {
+	console.error(`Usage: node find-nonce.js oscriptfile prefix`);
+	console.error(`E.g.: node find-nonce.js city.oscript CITY`);
+	process.exit();
+}
 
-const prefix = 'CITY';
 const re = /\/\* nonce: \w+ \*\//;
 
 function findNonce(definition) {
@@ -38,7 +44,7 @@ function findNonce(definition) {
 
 
 function start() {
-	const strInitialDefinition = fs.readFileSync('./city.oscript', 'utf8');
+	const strInitialDefinition = fs.readFileSync(file, 'utf8');
 	parse(strInitialDefinition, (err, definition) => {
 		if (err)
 			throw Error(err);
