@@ -747,7 +747,7 @@ describe('City', function () {
 
 
 	it("Launch the CITY token and try to buy with Bytes", async () => {
-		await this.timetravelToDate('2025-01-26')
+		await this.timetravelToDate('2025-02-26')
 		const bytes_amount = this.getAmountToBuy(true)
 		const city_amount = this.getAmountToBuy(false)
 		const { unit, error } = await this.bob.triggerAaWithData({
