@@ -55,6 +55,8 @@ describe('City', function () {
 		this.random_oracle_earnings = 0
 		this.bounce_fees = 0
 
+		this.launchDate = new Date()
+		this.launchDate.setMonth(this.launchDate.getMonth() + 1) // add 1 month
 
 		this.timetravel = async (shift = '1d') => {
 			const { error, timestamp } = await this.network.timetravel({ shift })
@@ -141,13 +143,13 @@ describe('City', function () {
 		city = city.replace(/randomness_aa: '\w*'/, `randomness_aa: '${this.randomness_aa_address}'`)
 		city = city.replace(/attestors: '\w*'/, `attestors: '${this.attestorAddress}'`)
 		city = city.replace(/\$fundraise_recipient = '\w*'/, `$fundraise_recipient = '${this.founderAddress}'`)
+		city = city.replace(/\$launch_date = '\w*'/, `$launch_date = '${this.launchDate.toISOString().slice(0, 10)}'`)
 
 		const { address, error } = await this.founder.deployAgent(city)
 		console.log(error)
 		expect(error).to.be.null
 		this.city_aa = address
 	})
-
 	it('Founder defines the token', async () => {
 		const { unit, error } = await this.founder.triggerAaWithData({
 			toAddress: this.city_aa,
@@ -747,7 +749,10 @@ describe('City', function () {
 
 
 	it("Launch the CITY token and try to buy with Bytes", async () => {
-		await this.timetravelToDate('2025-02-26')
+		const afterLaunchDate = new Date(this.launchDate)
+		afterLaunchDate.setDate(afterLaunchDate.getDate() + 1) // add 1 day
+		await this.timetravelToDate(afterLaunchDate.toISOString().slice(0, 10))
+
 		const bytes_amount = this.getAmountToBuy(true)
 		const city_amount = this.getAmountToBuy(false)
 		const { unit, error } = await this.bob.triggerAaWithData({
