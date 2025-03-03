@@ -398,7 +398,7 @@
 			},
 
 
-			// withdraw rand provider eranings
+			// withdraw rand provider earnings
 			{
 				if: `{
 					$randomness_aa = trigger.data.randomness_aa;
@@ -767,7 +767,7 @@
 					$total_working = $city.total_land + $city.total_rented + $rented_amount - $plot.rented_amount;
 					$elapsed = timestamp - $city.start_ts;
 					if ($plot.rented_amount AND timestamp < $plot.rental_expiry_ts){
-						require($rented_amount >= $plot.rented_amount, "rental ammount cannot be decreased");
+						require($rented_amount >= $plot.rented_amount, "rental amount cannot be decreased");
 						$unused_rent = floor($plot.rented_amount * ($plot.rental_expiry_ts - timestamp) / $year);
 					}
 					$count_buys_next_year = $year/$elapsed * $count_bought;
