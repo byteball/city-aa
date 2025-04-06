@@ -227,20 +227,21 @@
 					{
 						app: 'state',
 						state: `{
-							if ($name == 'new_city'){
-								var['city_'||$city_name] = {
-									count_plots: 0,
-									count_houses: 0,
-									total_land: 0,
-									total_bought: 0,
-									total_rented: 0,
-									start_ts: 0,
-									mayor: trigger.data.mayor,
-								};
-							}
-							else if ($city_name){
-								$city = var['city_'||$city_name];
-								$city[$name] = $value;
+							if ($city_name){
+								if ($name == 'new_city')
+									$city = {
+										count_plots: 0,
+										count_houses: 0,
+										total_land: 0,
+										total_bought: 0,
+										total_rented: 0,
+										start_ts: 0,
+										mayor: trigger.data.mayor,
+									};
+								else{
+									$city = var['city_'||$city_name];
+									$city[$name] = $value;
+								}
 								var['city_'||$city_name] = $city;
 							}
 							else{
@@ -885,6 +886,7 @@
 								require($house.amount, "mayor houses cannot be assigned shortcodes");
 								require($house.amount >= $variables.plot_price, "the plot is too cheap");
 								require(typeof($shortcode) == 'string', "shortcode must be a string");
+								require(has_only($shortcode, "a-z0-9_.-"), "shortcode is allowed to include only lowercase latin letters, numbers, -, _, and .");
 								require(!var['shortcode_'||$shortcode], "this shortcode is already taken");
 							//	if (trigger.data.address)
 							//		require(is_valid_address(trigger.data.address), "address not valid");

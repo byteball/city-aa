@@ -143,7 +143,7 @@ describe('City', function () {
 		city = city.replace(/randomness_aa: '\w*'/, `randomness_aa: '${this.randomness_aa_address}'`)
 		city = city.replace(/attestors: '\w*'/, `attestors: '${this.attestorAddress}'`)
 		city = city.replace(/\$fundraise_recipient = '\w*'/, `$fundraise_recipient = '${this.founderAddress}'`)
-		city = city.replace(/\$launch_date = '\w*'/, `$launch_date = '${this.launchDate.toISOString().slice(0, 10)}'`)
+		city = city.replace(/\$launch_date = '[0-9-]*'/, `$launch_date = '${this.launchDate.toISOString().slice(0, 10)}'`)
 
 		const { address, error } = await this.founder.deployAgent(city)
 		console.log(error)
@@ -1121,6 +1121,35 @@ describe('City', function () {
 	})
 
 
+	it("Bob edits his house and tries to use an invalid shortcode", async () => {
+		const house_num = 2
+		const info = { name: "Bob's palace", twitter: '@bob', blog: 'https://....' }
+		const shortcode = 'Bob'
+		const shortcode_price = 1e9
+		const { unit, error } = await this.bob.triggerAaWithData({
+			toAddress: this.city_aa,
+			amount: 10000,
+			data: {
+				edit_house: 1,
+				house_num,
+				info,
+				shortcode,
+				sell_shortcode: 1,
+				shortcode_price,
+			},
+		})
+		console.log({error, unit})
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const { response } = await this.network.getAaResponseToUnitOnNode(this.bob, unit)
+		console.log(response.response.error)
+		expect(response.response.error).to.eq("shortcode is allowed to include only lowercase latin letters, numbers, -, _, and .")
+		expect(response.bounced).to.be.true
+		expect(response.response_unit).to.be.null
+	})
+
+
 	it("Bob edits his house", async () => {
 		const house_num = 2
 		const info = { name: "Bob's palace", twitter: '@bob', blog: 'https://....' }
@@ -1161,7 +1190,7 @@ describe('City', function () {
 	it("Alice edits her house", async () => {
 		const house_num = 1
 		const info = { name: "Alice's palace", twitter: '@alice', blog: 'https://....' }
-		const shortcode = 'alice'
+		const shortcode = 'alice.in-wonderland'
 		const { unit, error } = await this.alice.triggerAaWithData({
 			toAddress: this.city_aa,
 			amount: 10000,
