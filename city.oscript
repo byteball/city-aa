@@ -123,9 +123,6 @@
 		$launch_ts = parse_date($launch_date);
 		$bPrelaunch = timestamp < $launch_ts;
 
-		// presale
-		$min_contribution = 1e9;
-
 		$constants = var['constants'] OTHERWISE {};
 
 		// CITY token
@@ -261,7 +258,6 @@
 					($received_amount > 0 OR $buy_from_balance OR trigger.data.mayor_plot) AND trigger.data.buy
 				}`,
 				init: `{
-				//	require(timestamp > $launch_ts, "not launched yet");
 					$city_name = trigger.data.city OTHERWISE 'city';
 					$city = var['city_'||$city_name];
 					require($city, "no such city");
