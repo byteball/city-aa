@@ -107,7 +107,7 @@
 
 		$lib = $lib_aa||'';
 
-		$year = 365 * 24 * 3600;
+		$year = 31536000; // 365 * 24 * 3600;
 		
 		$followup_reward_days = {
 			'60': true,  // +2 months
@@ -120,8 +120,7 @@
 		};
 		$followup_claim_term = 10; // days
 
-		$launch_ts = parse_date($launch_date);
-		$bPrelaunch = timestamp < $launch_ts;
+		$bPrelaunch = timestamp < parse_date($launch_date);
 
 		$constants = var['constants'] OTHERWISE {};
 
@@ -144,6 +143,7 @@
 		if (trigger.data.to AND !is_valid_address(trigger.data.to))
 			bounce("bad to address");
 		$to = trigger.data.to OTHERWISE trigger.address;
+		$username = attestation[[attestors=$variables.attestors, address=$to, ifnone=false]].username;
 
 		if (trigger.data.plot_num){
 			$plot_num = trigger.data.plot_num;
@@ -159,7 +159,7 @@
 	messages: {
 		cases: [
 
-			// 0. define the token asset and initial sale AA
+			// 0. define the token asset, governance AA, and the initial city
 			{
 				if: `{ trigger.data.define AND !$asset }`,
 				messages: [
@@ -261,7 +261,6 @@
 					$city_name = trigger.data.city OTHERWISE 'city';
 					$city = var['city_'||$city_name];
 					require($city, "no such city");
-					$username = attestation[[attestors=$variables.attestors, address=$to, ifnone=false]].username;
 					require($username, "your address must be attested");
 
 					$plot_price = $city.plot_price OTHERWISE $variables.plot_price;
@@ -679,21 +678,22 @@
 			// transfer a plot of land to trigger.data.to address
 			{
 				if: `{
-					$p2p_buy = trigger.data.p2p_buy AND $received_amount > 0;
+					$p2p_buy = trigger.data.p2p_buy AND !trigger.data.to AND $received_amount > 0;
 					$plot_num AND (trigger.data.transfer OR $p2p_buy)
 				}`,
 				init: `{
+					$old_owner = $plot.owner;
 					if ($p2p_buy){
-						require($plot.owner != trigger.address, "you are already the owner");
+						require($old_owner != trigger.address, "you are already the owner");
 						require($plot.sale_price, "not on sale");
 						require($plot.sale_price == $received_amount, "wrong amount");
 						$fee = ceil($variables.p2p_sale_fee * $plot.sale_price);
 					}
 					else{ // transfer
-						require($plot.owner == trigger.address, "you are not the owner");
-						require($to != $plot.owner, "same owner");
+						require($old_owner == trigger.address, "you are not the owner");
+						require($to != $old_owner, "same owner");
 					}
-					$old_owner = $plot.owner;
+					require($username, "new owner's address must be attested");
 				}`,
 				messages: [
 					{
@@ -733,6 +733,7 @@
 								response['event'] = json_stringify({type: 'transfer', plot_num: $plot_num, old_owner: $old_owner, new_owner: $to});
 							}
 							$plot.owner = $new_owner;
+							$plot.username = $username;
 							$plot.last_transfer_ts = timestamp;
 							delete($plot, 'sale_price');
 							// if the plot had a rental, it stays with the plot

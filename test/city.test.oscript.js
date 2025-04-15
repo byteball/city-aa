@@ -835,6 +835,29 @@ describe('City', function () {
 	})
 
 
+	it("Bob tries to transfer a plot to the VRF oracle, who is not attested", async () => {
+		const plot_num = this.plot_num - 2
+		const { unit, error } = await this.bob.triggerAaWithData({
+			toAddress: this.city_aa,
+			amount: 10000,
+			data: {
+				transfer: 1,
+				plot_num,
+				to: this.vrfOracleAddress,
+			},
+		})
+		console.log({error, unit})
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const { response } = await this.network.getAaResponseToUnitOnNode(this.bob, unit)
+		console.log(response.response.error)
+		expect(response.response.error).to.be.eq("new owner's address must be attested")
+		expect(response.bounced).to.be.true
+		expect(response.response_unit).to.be.null
+	})
+
+
 	it("Bob transfers a plot to Alice", async () => {
 		const plot_num = this.plot_num - 2
 		const { unit, error } = await this.bob.triggerAaWithData({
@@ -866,6 +889,7 @@ describe('City', function () {
 		expect(vars['user_land_' + this.bobAddress]).eq(this.bob_land)
 		expect(vars['user_land_city_' + this.bobAddress]).eq(this.bob_land)
 		expect(vars['plot_' + plot_num].owner).eq(this.aliceAddress)
+		expect(vars['plot_' + plot_num].username).eq('alice')
 		expect(vars['plot_' + plot_num].last_transfer_ts).eq(response.timestamp)
 
 	})
@@ -953,6 +977,7 @@ describe('City', function () {
 		expect(vars['user_land_' + this.bobAddress]).eq(this.bob_land)
 		expect(vars['user_land_city_' + this.bobAddress]).eq(this.bob_land)
 		expect(vars['plot_' + plot_num].owner).eq(this.aliceAddress)
+		expect(vars['plot_' + plot_num].username).eq('alice')
 		expect(vars['plot_' + plot_num].last_transfer_ts).eq(response.timestamp)
 		expect(vars['plot_' + plot_num].sale_price).to.be.undefined
 
