@@ -7,6 +7,8 @@
 
 		$lib_aa = '3LUPAHCQMJCQDKFVZB7GFKYJMHZ5BC67';
 
+		$year = 31536000; // 365 * 24 * 3600;
+		
 		$launch_date = '2025-02-25';
 		$fundraise_recipient = '';
 
@@ -85,9 +87,7 @@
 				bounce("the earlier plot was transferred after matching");
 
 			// check that no rentals were bought after plot2 to expand the matching area
-			if ($plot2.last_rental_ts)
-				bounce("the later plot was expanded by rental after matching");
-			if ($plot1.last_rental_ts AND $plot1.last_rental_ts > $plot2.ts)
+			if ($plot1.rental_expiry_ts AND $plot1.rental_expiry_ts - $year > $plot2.ts)
 				bounce("the earlier plot was expanded by rental after matching");
 
 			$variables = $get_variables();
@@ -107,8 +107,6 @@
 
 		$lib = $lib_aa||'';
 
-		$year = 31536000; // 365 * 24 * 3600;
-		
 		$followup_reward_days = {
 			'60': true,  // +2 months
 			'150': true, // +3 months
@@ -511,9 +509,7 @@
 						bounce("the earlier plot was transferred after matching");
 
 					// check that no rentals were bought after plot2 to expand the matching area
-					if ($plot2.last_rental_ts)
-						bounce("the later plot was expanded by rental after matching");
-					if ($plot1.last_rental_ts AND $plot1.last_rental_ts > $plot2.ts)
+					if ($plot1.rental_expiry_ts AND $plot1.rental_expiry_ts - $year > $plot2.ts)
 						bounce("the earlier plot was expanded by rental after matching");
 
 					$matching_probability = $city.matching_probability OTHERWISE $variables.matching_probability;
