@@ -1,6 +1,6 @@
 
 {
-	doc_url: "https://obyte.city/city.json",
+	doc_url: "https://city.obyte.org/city.json",
 	getters: `{
 
 		/* nonce: 3910404 */
@@ -22,7 +22,7 @@
 			$state = var['state'];
 			$state.total_land
 		};
-		
+
 
 		$get_variables = () => {
 			var['variables'] OTHERWISE {
