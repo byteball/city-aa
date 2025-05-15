@@ -18,6 +18,12 @@
 		$matching_timeout = 600;
 
 
+		$get_deposited_supply = () => {
+			$state = var['state'];
+			$state.total_land
+		};
+		
+
 		$get_variables = () => {
 			var['variables'] OTHERWISE {
 				matching_probability: 0.05,
