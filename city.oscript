@@ -764,17 +764,18 @@
 
 					$count_bought = $city.total_bought / $plot_price;
 					require($count_bought > 10, "too few plots bought yet"); // to make count_buys_next_year estimate reliable
-					$total_working = $city.total_land + $city.total_rented + $rented_amount - $plot.rented_amount;
+					$old_rented_amount = $plot.rented_amount;
+					$total_working = $city.total_land + $city.total_rented + $rented_amount - $old_rented_amount;
 					$elapsed = timestamp - $city.start_ts;
-					if ($plot.rented_amount AND timestamp < $plot.rental_expiry_ts){
-						require($rented_amount >= $plot.rented_amount, "rental amount cannot be decreased");
-						$unused_rent = floor($plot.rented_amount * ($plot.rental_expiry_ts - timestamp) / $year);
-					}
 					$count_buys_next_year = $year/$elapsed * $count_bought;
 					// income is overestimated if rental amount is large while $plot.amount is small, then the $plot.amount would be used in full before the year expires
-					$income_from_one_buy = 2 * $plot_price * $matching_probability * $rented_amount/$total_working; // "2" because there are two users, each earns one additional plot
-					$year_income = $income_from_one_buy * $count_buys_next_year;
-					$rental_fee = ceil($variables.rental_surcharge_factor * $year_income);
+					$income_from_one_buy_per_rented_token = 2 * $plot_price * $matching_probability / $total_working; // "2" because there are two users, each earns one additional plot
+					$fee_per_rented_token = $variables.rental_surcharge_factor * $income_from_one_buy_per_rented_token * $count_buys_next_year; // surcharge factor * yearly income per rented token
+					$rental_fee = ceil($fee_per_rented_token * $rented_amount);
+					if ($old_rented_amount AND timestamp < $plot.rental_expiry_ts){
+						require($rented_amount >= $old_rented_amount, "rental amount cannot be decreased");
+						$unused_rent = floor($fee_per_rented_token * $old_rented_amount * ($plot.rental_expiry_ts - timestamp) / $year);
+					}
 					$required_fee = $rental_fee - $unused_rent;
 					$excess = $received_amount - $required_fee;
 					require($excess >= 0, "not enough paid for rental fee, required "||$required_fee);
@@ -791,7 +792,7 @@
 						app: 'state',
 						state: `{
 							response['message'] = 'Rented';
-							$city.total_rented = $city.total_rented + $rented_amount - $plot.rented_amount;
+							$city.total_rented = $city.total_rented + $rented_amount - $old_rented_amount;
 							var['city_'||$plot.city] = $city;
 							$plot.rented_amount = $rented_amount;
 							$plot.rental_expiry_ts = timestamp + $year;
