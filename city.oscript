@@ -895,9 +895,8 @@
 							}
 							if (trigger.data.sell_shortcode AND is_integer(trigger.data.shortcode_price) AND trigger.data.shortcode_price >= 0)
 								$house.shortcode_price = trigger.data.shortcode_price; // 0 removes the shortcode from sale
-							if (exists(trigger.data.new_owner) AND $house.amount == 0){ // assign a manager of a mayor house
+							if (exists(trigger.data.new_owner) AND $house.amount == 0) // assign a manager of a mayor house
 								$house.owner = trigger.data.new_owner;
-							}
 							if (trigger.data.info)
 								$house.info = trigger.data.info;
 							response['message'] = 'Edited house';
