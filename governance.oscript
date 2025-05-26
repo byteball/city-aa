@@ -1,5 +1,5 @@
 {
-	doc_url: "https://obyte.city/governance.json",
+	doc_url: "https://city.obyte.org/governance.json",
 	init: `{
 
 		$challenging_period = params.challenging_period OTHERWISE 3*24*3600; // 3 days
