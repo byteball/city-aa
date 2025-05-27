@@ -3,7 +3,7 @@
 	doc_url: "https://city.obyte.org/random.json",
 	getters: `{
 
-		/* nonce: 413251 */
+		/* nonce: 3867027 */
 
 	}`,
 	init: `{
@@ -44,6 +44,8 @@
 						$bFinished = $acc.count_missing == 0 OR !$req.want_max_security;
 						if ($bFinished)
 							$rand = sha256($acc.proofs);
+						else
+							bounce("too early");
 					}
 				}`,
 				messages: [
