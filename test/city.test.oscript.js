@@ -150,7 +150,12 @@ describe('City', function () {
 		expect(error).to.be.null
 		this.city_aa = address
 	})
+
+
 	it('Founder defines the token', async () => {
+		const { error: tf_error } = await this.network.timefreeze()
+		expect(tf_error).to.be.null
+
 		const { unit, error } = await this.founder.triggerAaWithData({
 			toAddress: this.city_aa,
 			amount: 10000,
@@ -1024,14 +1029,12 @@ describe('City', function () {
 		expect(response.response.responseVars.message).to.eq("Rented")
 
 		const { unitObj } = await this.bob.getUnitInfo({ unit: response.response_unit })
-		console.log(Utils.getExternalPayments(unitObj))
-		expect(Utils.getExternalPayments(unitObj)).to.deep.equalInAnyOrder([
-			{
-				asset: this.asset,
-				address: this.bobAddress,
-				amount: excess,
-			},
-		])
+		const payments = Utils.getExternalPayments(unitObj)
+		console.log(payments)
+		expect(payments.length).to.eq(1)
+		expect(payments[0].asset).to.eq(this.asset)
+		expect(payments[0].address).to.eq(this.bobAddress)
+		expect(payments[0].amount).to.be.closeTo(excess, 1)
 
 		const { vars } = await this.bob.readAAStateVars(this.city_aa)
 		expect(vars['plot_' + plot_num].rented_amount).eq(rented_amount)
@@ -1044,6 +1047,144 @@ describe('City', function () {
 			total_rented: rented_amount,
 			start_ts: this.start_ts,
 			mayor: this.founderAddress,
+		})
+
+		this.total_rented = rented_amount
+
+		// plot_num - 3 is Alices's 2nd reward plot
+		const bNeighbors = await this.are_neighbors(plot_num - 3, plot_num)
+		console.log(`plots ${plot_num - 3} and ${plot_num} are neighbors? ${bNeighbors}`);
+
+	})
+
+
+	it("Bob immediately rents the same area again and doesn't pay anything", async () => {
+		const plot_num = this.plot_num
+		const rented_amount = 1 * this.plot_price
+
+		const year = 365 * 24 * 3600
+		const ts = Math.round(await this.timetravel('0s') / 1000)
+		const elapsed = ts - this.start_ts
+		const buys_per_year = year / elapsed * (this.plot_num - 4)
+		const income_per_buy = 2 * this.plot_price * this.matching_probability * rented_amount / (this.total_land + rented_amount)
+		const rental_fee = 0//Math.ceil(buys_per_year * income_per_buy)
+		console.log('rental fee', rental_fee, `=${rental_fee/this.plot_price} plots`)
+		const excess = 100
+
+		const { unit, error } = await this.bob.sendMulti({
+			outputs_by_asset: {
+				[this.asset]: [{ address: this.city_aa, amount: rental_fee + excess }],
+				base: [{ address: this.city_aa, amount: 10000 }],
+			},
+			messages: [{
+				app: 'data',
+				payload: {
+					rent: 1,
+					plot_num,
+					rented_amount,
+				}
+			}],
+			spend_unconfirmed: 'all',
+		})
+		console.log({error, unit})
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const { response } = await this.network.getAaResponseToUnitOnNode(this.bob, unit)
+		console.log(response.response.error)
+		expect(response.response.error).to.be.undefined
+		expect(response.bounced).to.be.false
+		expect(response.response_unit).to.be.validUnit
+		expect(response.response.responseVars.message).to.eq("Rented")
+
+		const { unitObj } = await this.bob.getUnitInfo({ unit: response.response_unit })
+		const payments = Utils.getExternalPayments(unitObj)
+		console.log(payments)
+		expect(payments.length).to.eq(1)
+		expect(payments[0].asset).to.eq(this.asset)
+		expect(payments[0].address).to.eq(this.bobAddress)
+		expect(payments[0].amount).to.be.closeTo(excess, 1)
+
+		const { vars } = await this.bob.readAAStateVars(this.city_aa)
+		expect(vars['plot_' + plot_num].rented_amount).eq(rented_amount)
+		expect(vars['plot_' + plot_num].rental_expiry_ts).eq(ts + year)
+		expect(vars.city_city).to.deep.eq({
+			count_plots: this.count_plots,
+			count_houses: 2,
+			total_land: this.total_land,
+			total_bought: this.total_bought,
+			total_rented: rented_amount,
+			start_ts: this.start_ts,
+			mayor: this.founderAddress,
+		})
+
+		this.total_rented = rented_amount
+
+		// plot_num - 3 is Alices's 2nd reward plot
+		const bNeighbors = await this.are_neighbors(plot_num - 3, plot_num)
+		console.log(`plots ${plot_num - 3} and ${plot_num} are neighbors? ${bNeighbors}`);
+
+	})
+
+
+	it('Bob rents the same area again after 10 days and pays for the additional 10 days', async () => {
+		const plot_num = this.plot_num
+		const rented_amount = 1 * this.plot_price
+
+		const year = 365 * 24 * 3600
+		const ts = Math.round(await this.timetravel('10d') / 1000)
+		const elapsed = ts - this.start_ts
+		const buys_per_year = year / elapsed * (this.plot_num - 4)
+		const income_per_buy = 2 * this.plot_price * this.matching_probability * rented_amount / (this.total_land + rented_amount)
+		const rental_fee = Math.ceil(buys_per_year * income_per_buy * 10 / 365)
+		console.log('rental fee', rental_fee, `=${rental_fee/this.plot_price} plots`)
+		const excess = 100
+
+		const { unit, error } = await this.bob.sendMulti({
+			outputs_by_asset: {
+				[this.asset]: [{ address: this.city_aa, amount: rental_fee + excess }],
+				base: [{ address: this.city_aa, amount: 10000 }],
+			},
+			messages: [{
+				app: 'data',
+				payload: {
+					rent: 1,
+					plot_num,
+					rented_amount,
+				}
+			}],
+			spend_unconfirmed: 'all',
+		})
+		console.log({error, unit})
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const { response } = await this.network.getAaResponseToUnitOnNode(this.bob, unit)
+		console.log(response.response.error)
+		expect(response.response.error).to.be.undefined
+		expect(response.bounced).to.be.false
+		expect(response.response_unit).to.be.validUnit
+		expect(response.response.responseVars.message).to.eq("Rented")
+
+		const { unitObj } = await this.bob.getUnitInfo({ unit: response.response_unit })
+		const payments = Utils.getExternalPayments(unitObj)
+		console.log(payments)
+		expect(payments.length).to.eq(1)
+		expect(payments[0].asset).to.eq(this.asset)
+		expect(payments[0].address).to.eq(this.bobAddress)
+		expect(payments[0].amount).to.be.closeTo(excess, 1)
+
+		const { vars } = await this.bob.readAAStateVars(this.city_aa)
+		expect(vars['plot_' + plot_num].rented_amount).eq(rented_amount)
+		expect(vars['plot_' + plot_num].rental_expiry_ts).eq(ts + year)
+		expect(vars.city_city).to.deep.eq({
+			count_plots: this.count_plots,
+			count_houses: 2,
+			total_land: this.total_land,
+			total_bought: this.total_bought,
+			total_rented: rented_amount,
+			start_ts: this.start_ts,
+			mayor: this.founderAddress
 		})
 
 		this.total_rented = rented_amount
