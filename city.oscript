@@ -3,17 +3,16 @@
 	doc_url: "https://city.obyte.org/city.json",
 	getters: `{
 
-		/* nonce: 3910404 */
+		/* nonce: 2514004 */
 
 		$lib_aa = '3LUPAHCQMJCQDKFVZB7GFKYJMHZ5BC67';
 
 		$year = 31536000; // 365 * 24 * 3600;
 		
-		$launch_date = '2025-02-25';
-		$fundraise_recipient = '';
+		$launch_date = '2025-07-01';
+		$fundraise_recipient = 'NJ2JFDOOSJVKXIMKA4HFJ5P65FRUDZOA';
 
 
-		$randomness_timeout = 1800;
 		$max_randomness_delay = 600;
 		$matching_timeout = 600;
 
@@ -26,16 +25,16 @@
 
 		$get_variables = () => {
 			var['variables'] OTHERWISE {
-				matching_probability: 0.05,
+				matching_probability: 0.1,
 				plot_price: 1000e9,
 				referral_boost: 0.1,
-				randomness_aa: '',
+				randomness_aa: 'R2OVZFLVPBY65CNRL4W6GKK34XGOOQJS',
 				randomness_price: 0.001,
 				p2p_sale_fee: 0.01,
 				shortcode_sale_fee: 0.01,
 				rental_surcharge_factor: 1,
 				followup_reward_share: 0.1,
-				attestors: '',
+				attestors: 'JBW7HT5CRBSF7J7RD26AYLQG6GZDPFPS:5KM36CFPBD2QJLVD65PHZG34WEM4RPY2',
 			}
 		};
 
