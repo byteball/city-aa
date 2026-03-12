@@ -56,8 +56,11 @@
 						require(!var[$city_aa]['city_'||$city], "this city already exists");
 						$full_name = $name||'|'||$city||'|'||$mayor;
 					}
-					else if ($per_city_names[$name] AND $city)
+					else if ($city){
+						require($per_city_names[$name], "this is not a per-city variable");
+						require(var[$city_aa]['city_'||$city], "no such city");
 						$full_name = $name||'|'||$city;
+					}
 					else
 						$full_name = $name;
 					$leader = var['leader_' || $full_name];
