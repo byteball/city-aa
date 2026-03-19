@@ -2572,6 +2572,47 @@ describe('City', function () {
 	})
 
 
+	it("Alice unvotes mayor of city 'şehir'", async () => {
+		const city = 'şehir'
+		const name = 'mayor'
+		const { unit, error } = await this.alice.triggerAaWithData({
+			toAddress: this.governance_aa,
+			amount: 10000,
+			data: {
+				name,
+				city,
+			},
+		})
+		console.log({error, unit})
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const full_name = name + '|' + city
+
+		const { response } = await this.network.getAaResponseToUnitOnNode(this.alice, unit)
+		console.log(response.response.error)
+		expect(response.response.error).to.be.undefined
+		expect(response.bounced).to.be.false
+		expect(response.response_unit).to.be.null
+
+		const { vars } = await this.alice.readAAStateVars(this.governance_aa)
+		expect(vars['support_' + full_name + '_' + this.bobAddress]).to.eq(0)
+		expect(vars['leader_' + full_name]).to.eq(this.bobAddress)
+		expect(vars['challenging_period_start_ts_' + full_name]).to.lt(response.timestamp)
+		expect(vars['choice_' + this.aliceAddress + '_' + full_name]).to.be.undefined
+		expect(vars['votes_' + this.aliceAddress]).deep.eq({
+			[`new_city|${city}|${this.aliceAddress}`]: {
+				value: 'yes',
+				balance: this.alice_land - this.plot_price, // earlier balance
+			},
+			'plot_price': {
+				value: 50e9,
+				balance: this.alice_land - 50e9 - 40e9, // even earlier balance
+			},
+		})
+	})
+
+
 	it("Alice transfers her plot in şehir to Bob", async () => {
 		const city = 'şehir'
 		const plot_num = this.plot_num - 1 // the last was a mayor plot
@@ -2611,10 +2652,6 @@ describe('City', function () {
 		expect(gov_vars['support_new_city|' + city + '|' + this.aliceAddress + '_yes']).to.eq((this.bob_land - this.plot_price) + this.alice_land) // previous bob's land plus new alice's land
 		expect(gov_vars['support_plot_price_' + 50e9]).to.eq(this.alice_land)
 		expect(gov_vars['votes_' + this.aliceAddress]).deep.eq({
-			[`mayor|${city}`]: {
-				value: this.bobAddress,
-				balance: 0,
-			},
 			[`new_city|${city}|${this.aliceAddress}`]: {
 				value: 'yes',
 				balance: this.alice_land,
@@ -2625,6 +2662,45 @@ describe('City', function () {
 			},
 		})
 
+	})
+
+
+	it("Alice unvotes new city named 'şehir'", async () => {
+		const city = 'şehir'
+		const name = 'new_city'
+		const mayor = this.aliceAddress
+		const { unit, error } = await this.alice.triggerAaWithData({
+			toAddress: this.governance_aa,
+			amount: 10000,
+			data: {
+				name,
+				city,
+				mayor,
+			},
+		})
+		console.log({error, unit})
+		expect(error).to.be.null
+		expect(unit).to.be.validUnit
+
+		const full_name = name + '|' + city + '|' + mayor
+
+		const { response } = await this.network.getAaResponseToUnitOnNode(this.alice, unit)
+		console.log(response.response.error)
+		expect(response.response.error).to.be.undefined
+		expect(response.bounced).to.be.false
+		expect(response.response_unit).to.be.null
+
+		const { vars } = await this.alice.readAAStateVars(this.governance_aa)
+		expect(vars['support_' + full_name + '_yes']).to.eq(this.bob_land - this.plot_price) // previous bob's land before the transfer from alice
+		expect(vars['leader_' + full_name]).to.eq('yes')
+		expect(vars['challenging_period_start_ts_' + full_name]).to.eq(this.challenging_period_start_ts)
+		expect(vars['choice_' + this.aliceAddress + '_' + full_name]).to.be.undefined
+		expect(vars['votes_' + this.aliceAddress]).deep.eq({
+			'plot_price': {
+				value: 50e9,
+				balance: this.alice_land, // earlier balance
+			},
+		})
 	})
 
 

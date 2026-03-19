@@ -124,6 +124,15 @@
 					if ($name == 'mayor' AND !$city) bounce("mayor without a city");
 					$bCityVote = $per_city_names[$name] AND $city; // else global vote
 
+					if ($name == 'new_city'){
+						$mayor = trigger.data.mayor;
+						require($city, "city name not provided");
+						require(length($city) <= 20, "new city name is too long");
+						require(is_valid_address($mayor), "mayor address not valid");
+					}
+					
+					$full_name = ($name == 'new_city') ? ($name||'|'||$city||'|'||$mayor) : ($city ? $name||'|'||$city : $name);
+
 					$balance = var[$city_aa]['user_land_' || ($bCityVote ? $city||'_' : '') || trigger.address];
 					require($balance, "you have no land and cannot vote");
 
@@ -141,10 +150,6 @@
 							}
 							else if ($name == 'new_city'){
 								require($value == 'yes' OR $value == 'no', "value must be yes or no");
-								$mayor = trigger.data.mayor;
-								require($city, "city name not provided");
-								require(length($city) <= 20, "new city name is too long");
-								require(is_valid_address($mayor), "mayor address not valid");
 								require(!var[$city_aa]['city_'||$city], "this city already exists");
 							}
 						}
@@ -159,7 +164,6 @@
 							else if ($name == 'rental_surcharge_factor')
 								require($value >= 1, "must be >=1");
 						}
-						$full_name = ($name == 'new_city') ? ($name||'|'||$city||'|'||$mayor) : ($city ? $name||'|'||$city : $name);
 					}
 				}`,
 				messages: [
