@@ -3,7 +3,7 @@
 	doc_url: "https://city.obyte.org/city.json",
 	getters: `{
 
-		/* nonce: 2514004 */
+		/* nonce: 36605615 */
 
 		$old_city_aa = 'CITYC3WWO5DD2UM6HQR3H333RRTD253Q';
 		$replicator = 'GAFNBCPR3KE3VHJAW4NN36ZA3OU7EGM5'; // replicates data from the old AA, then renounces one's rights
@@ -156,7 +156,7 @@
 
 		$is_replicator_request = trigger.address == $replicator AND !$constants.renounced;
 
-		$governance_base_aa = 'VRLPA6ZDWVQ3SSPUYC4ACQMXDKP4MIN5';
+		$governance_base_aa = 'RPUA6HU7F2A4J2WG6G3U376ITKBGMY4W';
 
 	}`,
 	messages: {

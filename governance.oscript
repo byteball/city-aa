@@ -208,7 +208,7 @@
 							if (!$votes) return;
 							$balance = var[$city_aa]['user_land_' || trigger.data.address];
 							$city_balance = var[$city_aa]['user_land_' || trigger.data.city || '_' || trigger.data.address];
-							foreach($votes, $count_names, ($name, $vote) => {
+							foreach($votes, 20, ($name, $vote) => {
 								$value_key = $get_value_key($vote.value);
 								$parts = split($name, '|');
 								if (length($parts) == 2){ // new_city has 3 parts and is a global vote
