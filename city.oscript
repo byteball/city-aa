@@ -5,13 +5,14 @@
 
 		/* nonce: 2514004 */
 
+		$old_city_aa = 'CITYC3WWO5DD2UM6HQR3H333RRTD253Q';
+		$replicator = 'GAFNBCPR3KE3VHJAW4NN36ZA3OU7EGM5'; // replicates data from the old AA, then renounces one's rights
+
+
 		$lib_aa = '3LUPAHCQMJCQDKFVZB7GFKYJMHZ5BC67';
 
 		$year = 31536000; // 365 * 24 * 3600;
 		
-		$launch_date = '2025-07-01';
-		$fundraise_recipient = 'NJ2JFDOOSJVKXIMKA4HFJ5P65FRUDZOA';
-
 
 		$max_randomness_delay = 600;
 		$matching_timeout = 600;
@@ -123,8 +124,6 @@
 		};
 		$followup_claim_term = 10; // days
 
-		$bPrelaunch = timestamp < parse_date($launch_date);
-
 		$constants = var['constants'] OTHERWISE {};
 
 		// CITY token
@@ -141,7 +140,7 @@
 		};
 
 		if ($asset)
-			$received_amount = trigger.output[[asset=($bPrelaunch AND trigger.data.buy AND !trigger.data.mayor_plot ? 'base' : $asset)]];
+			$received_amount = trigger.output[[asset=$asset]];
 
 		if (trigger.data.to AND !is_valid_address(trigger.data.to))
 			bounce("bad to address");
@@ -155,8 +154,9 @@
 			require($plot.status == 'land', "not a vacant plot of land");
 		}
 
+		$is_replicator_request = trigger.address == $replicator AND !$constants.renounced;
 
-		$governance_base_aa = 'JGGFM55N6626QBQWAYBHMBN6A76TVPK5';
+		$governance_base_aa = 'R3QQARHFMABSTKZA3W7OT6PQF2EN5M2H';
 
 	}`,
 	messages: {
@@ -164,9 +164,10 @@
 
 			// 0. define the token asset, governance AA, and the initial city
 			{
-				if: `{ trigger.data.define AND !$asset }`,
+				if: `{ trigger.data.define AND !$asset OR trigger.data.renounce AND $is_replicator_request }`,
 				messages: [
 					{
+						if: `{!trigger.data.renounce}`,
 						app: 'asset',
 						payload: {
 							// without cap
@@ -180,6 +181,7 @@
 						}
 					},
 					{ // define governance AA
+						if: `{!trigger.data.renounce}`,
 						app: 'definition',
 						payload: {
 							definition: [
@@ -196,19 +198,14 @@
 					{
 						app: 'state',
 						state: `{
-							$constants.asset = response_unit;
-							$constants.governance_aa = unit[response_unit].messages[[.app='definition']].payload.address;
+							if (trigger.data.renounce)
+								$constants.renounced = true;
+							else{
+								$constants.asset = response_unit;
+								$constants.governance_aa = unit[response_unit].messages[[.app='definition']].payload.address;
+								response['asset'] = response_unit;
+							}
 							var['constants'] = $constants;
-							var['city_city'] = { // the first city is called just "city"
-								count_plots: 0,
-								count_houses: 0,
-								total_land: 0,
-								total_bought: 0,
-								total_rented: 0,
-								start_ts: 0,
-								mayor: $fundraise_recipient,
-							};
-							response['asset'] = response_unit;
 						}`
 					}
 				]
@@ -228,6 +225,7 @@
 						app: 'state',
 						state: `{
 							if ($city_name){
+								$var_name = 'city_'||$city_name;
 								if ($name == 'new_city')
 									$city = {
 										count_plots: 0,
@@ -239,20 +237,55 @@
 										mayor: trigger.data.mayor,
 									};
 								else{
-									$city = var['city_'||$city_name];
+									$city = var[$var_name];
 									$city[$name] = $value;
 								}
-								var['city_'||$city_name] = $city;
+								$var_value = $city;
 							}
 							else{
 								$variables[$name] = $value;
-								var['variables'] = $variables;
+								$var_name = 'variables';
+								$var_value = $variables;
 							}
+							var[$var_name] = $var_value;
 						}`
 					}
 				]
 			},
 
+			
+			// replicate variables from the old AA
+			{
+				if: `{ $is_replicator_request AND trigger.data.var_name }`,
+				messages: [
+					{
+						app: 'state',
+						state: `{
+							require(trigger.data.var_name != 'constants', "constants cannot be replicated");
+							var[trigger.data.var_name] = var[$old_city_aa][trigger.data.var_name];
+						}`
+					}
+				]
+			},
+
+			
+			// restore user balances
+			{
+				if: `{ $is_replicator_request AND trigger.data.outputs }`,
+				init: `{
+					$payload = {
+						asset: $asset,
+						outputs: trigger.data.outputs,
+					};
+				}`,
+				messages: [
+					{
+						app: 'payment',
+						payload: '{$payload}'
+					},
+				]
+			},
+			
 
 			// request to buy a plot of land
 			{
@@ -283,20 +316,11 @@
 						$bMayorPlot = true;
 					}
 					else{
-						$bought_tokens = $bPrelaunch ? floor($plot_price * 0.1) : 0;
-						$expected_amount = round(($price + $bought_tokens)/($bPrelaunch ? 1000 : 1));
+						$expected_amount = round($price);
 						require($received_amount == $expected_amount, "incorrect amount received, expected "||$expected_amount);
 					}
 				}`,
 				messages: [
-					{
-						if: `{$bought_tokens}`,
-						app: 'payment',
-						payload: {
-							asset: `{$asset}`,
-							outputs: [{address: "{$to}", amount: "{$bought_tokens}"}]
-						}
-					},
 					{
 						app: 'state',
 						state: `{
@@ -610,11 +634,15 @@
 											ts: timestamp,
 										};
 										$last_plot_num = $state.last_plot_num;
-										foreach([1,2,3,4], 4, $offset => {
+										foreach([1,2], 2, $offset => {
 											$new_plot_num = $last_plot_num + $offset;
-											$p = $offset <= 2 ? $p1 : $p2;
-											var['plot_'||$new_plot_num] = $p;
-											$events[] = {type: 'reward', plot_num: $new_plot_num, owner: $p.owner, amount: $amount, city: $city_name};
+											var['plot_'||$new_plot_num] = $p1;
+											$events[] = {type: 'reward', plot_num: $new_plot_num, owner: $p1.owner, amount: $amount, city: $city_name};
+										});
+										foreach([3,4], 2, $offset => {
+											$new_plot_num = $last_plot_num + $offset;
+											var['plot_'||$new_plot_num] = $p2;
+											$events[] = {type: 'reward', plot_num: $new_plot_num, owner: $p2.owner, amount: $amount, city: $city_name};
 										});
 
 										// reassign main plot num if it has just been built upon
@@ -753,7 +781,7 @@
 			{
 				if: `{
 					$rented_amount = trigger.data.rented_amount;
-					trigger.data.rent AND $plot_num AND $rented_amount AND $received_amount > 0
+					trigger.data.rent AND $plot_num AND $rented_amount > 0 AND $received_amount > 0
 				}`,
 				init: `{
 					require($plot.owner == trigger.address, "you are not the owner");
@@ -776,6 +804,7 @@
 						$unused_rent = floor($fee_per_rented_token * $old_rented_amount * ($plot.rental_expiry_ts - timestamp) / $year);
 					}
 					$required_fee = $rental_fee - $unused_rent;
+					require($required_fee > 0, "bad fee");
 					$excess = $received_amount - $required_fee;
 					require($excess >= 0, "not enough paid for rental fee, required "||$required_fee);
 				}`,
@@ -983,23 +1012,6 @@
 					}
 				]
 			},
-
-
-			// withdraw the fundraise
-			{
-				if: `{trigger.data.withdraw_fundraise AND trigger.data.amount AND trigger.address == $fundraise_recipient}`,
-				messages: [
-					{
-						app: 'payment',
-						payload: {
-							asset: "base",
-							outputs: [{address: "{trigger.address}", amount: "{trigger.data.amount}"}],
-						}
-					}
-				]
-			},
-
-
 
 		]
 	}

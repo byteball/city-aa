@@ -11,6 +11,7 @@
     "node": ">=8"
   },
   "dependencies": {
+		"aabot": "git+https://github.com/byteball/aabot.git",
     "aa-testkit": "git+https://github.com/valyakin/aa-testkit.git",
     "chai": "^4.2.0",
     "mocha": "^6.2.0"
