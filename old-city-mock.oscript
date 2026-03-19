@@ -1,0 +1,17 @@
+
+{
+	messages: [{
+		app: 'state',
+		state: `{
+			var['city_city'] = { // the first city is called just "city"
+				count_plots: 0,
+				count_houses: 0,
+				total_land: 0,
+				total_bought: 0,
+				total_rented: 0,
+				start_ts: 0,
+				mayor: trigger.data.mayor,
+			};
+		}`
+	}]
+}

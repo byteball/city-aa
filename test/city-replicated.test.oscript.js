@@ -26,7 +26,7 @@ describe('City', function () {
 			.with.agent({ governance_base: path.join(__dirname, '../governance.oscript') })
 			.with.agent({ lib: path.join(__dirname, '../city-lib.oscript') })
 			.with.agent({ random_base: path.join(__dirname, '../random.oscript') })
-			.with.agent({ old_city: path.join(__dirname, '../old-city.oscript') })
+			.with.agent({ old_city: path.join(__dirname, '../old-city-mock.oscript') })
 			.with.wallet({ alice: 1000e9 })
 			.with.wallet({ bob: 1000e9 })
 			.with.wallet({ founder: 1e9 })
