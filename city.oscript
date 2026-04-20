@@ -3,7 +3,7 @@
 	doc_url: "https://city.obyte.org/city.json",
 	getters: `{
 
-		/* nonce: 36605615 */
+		/* nonce: 76039554 */
 
 		$old_city_aa = 'CITYC3WWO5DD2UM6HQR3H333RRTD253Q';
 		$replicator = 'GAFNBCPR3KE3VHJAW4NN36ZA3OU7EGM5'; // replicates data from the old AA, then renounces one's rights
@@ -487,6 +487,7 @@
 							var['plot_'||$plot_num] = false;
 							$city.count_plots = $city.count_plots - 1;
 							$city.total_land = $city.total_land - $amount;
+							$city.total_rented = $city.total_rented - $plot.rented_amount;
 							$state.total_land = $state.total_land - $amount;
 							var['city_'||$city_name] = $city;
 							var['user_land_'||trigger.address] -= $amount;
