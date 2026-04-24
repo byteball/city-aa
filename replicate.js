@@ -5,6 +5,7 @@ const operator = require('aabot/operator.js');
 
 const old_city_aa = 'CITYC3WWO5DD2UM6HQR3H333RRTD253Q';
 const old_asset = 'HoKGB+QQ8+jZ4hZHqvZwNYcsrbP0Njztxn6t4BQro4M=';
+const odex_aa = 'FVRZTCFXIDQ3EYRGQSLE5AMWUQF4PRYJ';
 const new_city_aa = process.argv[2];
 
 if (!new_city_aa) {
@@ -14,11 +15,43 @@ if (!new_city_aa) {
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fetchHolders() {
+async function fetchDirectHolders() {
 	const url = `https://explorer.obyte.org/api/asset/${encodeURIComponent(old_asset)}/next_page_holders`;
 	const res = await fetch(url);
 	const data = await res.json();
-	return data.holders || [];
+	const holders = data.holders || [];
+	console.error(`Direct holders: (${holders.length})`, holders);
+	return holders;
+}
+
+
+async function fetchOdexHolders() {
+	let holders = [];
+	const vars = await dag.readAAStateVars(odex_aa, 'balance_');
+	for (const var_name in vars) {
+		const [, address, asset] = var_name.split('_');
+		if (asset !== old_asset) continue;
+		const balance = vars[var_name];
+		if (balance > 0)
+			holders.push({ address, balance });
+	}
+	console.error(`ODEX holders: (${holders.length})`, holders);
+	return holders;
+}
+
+async function fetchHolders() {
+	const direct_holders = await fetchDirectHolders();
+	const odex_holders = await fetchOdexHolders();
+	const balancesByAddress = new Map();
+
+	for (const holder of [...direct_holders, ...odex_holders]) {
+		const previousBalance = balancesByAddress.get(holder.address) || 0;
+		balancesByAddress.set(holder.address, previousBalance + holder.balance);
+	}
+
+	const holders = Array.from(balancesByAddress, ([address, balance]) => ({ address, balance }));
+	console.error(`Total holders: (${holders.length})`, holders);
+	return holders;
 }
 
 async function isAA(address) {
