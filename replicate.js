@@ -66,17 +66,23 @@ async function isAA(address) {
 
 async function replicateStateVars() {
 	const vars = await dag.readAAStateVars(old_city_aa);
+	const new_vars = await dag.readAAStateVars(new_city_aa);
 	const var_names = Object.keys(vars).filter(name => name !== 'constants');
 	console.error(`Found ${var_names.length} state vars to replicate (excluding 'constants')`);
 
+	let i = 1;
 	for (const var_name of var_names) {
-		console.error(`Replicating ${var_name} ...`);
-		continue
-		const unit = await dag.sendAARequest(new_city_aa, { var_name });
+		console.error(`Replicating ${i}/${var_names.length}: ${var_name} ...`);
+		i++;
+		if (new_vars[var_name] !== undefined) {
+			console.error(`Variable ${var_name} already exists in the new AA, skipping`);
+			continue;
+		}
+		const unit = await dag.sendAARequest(new_city_aa, { var_name }, 1);
 		if (unit)
 			console.error(`Sent replication request for ${var_name}, unit: ${unit}`);
 		else
-			console.error(`Failed to send replication request for ${var_name}`);
+			throw new Error(`Failed to send replication request for ${var_name}`);
 		await wait(500);
 	}
 
@@ -98,13 +104,12 @@ async function replicateBalances() {
 		userOutputs.push({ address: holder.address, amount: holder.balance });
 	}
 	console.error(`${userOutputs.length} non-AA holders to replicate`, userOutputs);
-	return;
 
-	const unit = await dag.sendAARequest(new_city_aa, { outputs: userOutputs });
+	const unit = await dag.sendAARequest(new_city_aa, { outputs: userOutputs }, 1);
 	if (unit)
 		console.error(`Sent balance replication request, unit: ${unit}`);
 	else
-		console.error(`Failed to send balance replication request`);
+		throw new Error(`Failed to send balance replication request`);
 
 	console.error("All balance replication requests sent");
 }
@@ -113,7 +118,7 @@ async function work() {
 	await operator.start();
 	const my_address = operator.getAddress();
 	console.error(`Operator address: ${my_address}`);
-//	await replicateStateVars();
+	await replicateStateVars();
 	await replicateBalances();
 	process.exit();
 }
